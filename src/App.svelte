@@ -1,0 +1,258 @@
+<script>
+  import { feedSources, fetchAllFeeds } from './lib/feeds.js';
+  import { parseFeed, sortByDate } from './lib/parser.js';
+  import { getReadArticles, markAsRead, toggleRead, getLastVisit, updateLastVisit } from './lib/storage.js';
+
+  let articles = $state([]);
+  let readArticles = $state(getReadArticles());
+  let loading = $state(true);
+  let loadingStatus = $state('');
+  let errors = $state([]);
+  let filter = $state('all');
+  let sourceFilter = $state(null);
+  let lastVisit = $state(getLastVisit());
+  let showMarkAsReadMenu = $state(false);
+  let showSources = $state(false);
+
+  const articleCountBySource = $derived(() => {
+    const counts = {};
+    for (const article of articles) {
+      counts[article.source] = (counts[article.source] || 0) + 1;
+    }
+    return counts;
+  });
+
+  const filteredArticles = $derived(() => {
+    let result = articles;
+
+    if (sourceFilter) {
+      result = result.filter(a => a.source === sourceFilter);
+    }
+
+    if (filter === 'unread') {
+      result = result.filter(a => !(a.id in readArticles));
+    }
+
+    return result;
+  });
+
+  const unreadCount = $derived(articles.filter(a => !(a.id in readArticles)).length);
+  const newSinceLastVisit = $derived(
+    lastVisit ? articles.filter(a => a.pubDate && a.pubDate.getTime() > lastVisit).length : 0
+  );
+
+  async function loadFeeds() {
+    loading = true;
+    loadingStatus = 'Henter feeds...';
+    errors = [];
+    articles = [];
+
+    const { results, errors: fetchErrors } = await fetchAllFeeds((name, success) => {
+      loadingStatus = `${success ? '✓' : '✗'} ${name}`;
+    });
+
+    errors = fetchErrors;
+
+    // Filter to last month only
+    const oneMonthAgo = new Date();
+    oneMonthAgo.setMonth(oneMonthAgo.getMonth() - 1);
+
+    const allArticles = [];
+    for (const { xml, source } of results) {
+      const parsed = parseFeed(xml, source);
+      const recent = parsed.filter(a => !a.pubDate || a.pubDate >= oneMonthAgo);
+      allArticles.push(...recent);
+    }
+
+    articles = sortByDate(allArticles);
+    readArticles = getReadArticles();
+    loading = false;
+
+    updateLastVisit();
+  }
+
+  function handleToggleRead(articleId) {
+    toggleRead(articleId);
+    readArticles = getReadArticles();
+  }
+
+  function markAllAsRead(timeFilter = 'all') {
+    const now = new Date();
+    const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+    const oneWeekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+
+    let articlesToMark = articles;
+
+    if (timeFilter === 'today') {
+      articlesToMark = articles.filter(a => a.pubDate && a.pubDate >= oneDayAgo);
+    } else if (timeFilter === 'week') {
+      articlesToMark = articles.filter(a => a.pubDate && a.pubDate >= oneWeekAgo);
+    }
+
+    for (const article of articlesToMark) {
+      if (!(article.id in readArticles)) {
+        markAsRead(article.id);
+      }
+    }
+
+    readArticles = getReadArticles();
+    showMarkAsReadMenu = false;
+  }
+
+  function formatDate(date) {
+    if (!date) return '';
+    const now = new Date();
+    const diff = now.getTime() - date.getTime();
+    const hours = Math.floor(diff / (1000 * 60 * 60));
+    const days = Math.floor(hours / 24);
+
+    if (hours < 1) return 'Akkurat nå';
+    if (hours < 24) return `${hours}t siden`;
+    if (days < 7) return `${days}d siden`;
+
+    return date.toLocaleDateString('no-NO', {
+      day: 'numeric',
+      month: 'short',
+    });
+  }
+
+  function isNewSinceLastVisit(article) {
+    if (!lastVisit || !article.pubDate) return false;
+    return article.pubDate.getTime() > lastVisit;
+  }
+
+  $effect(() => {
+    loadFeeds();
+  });
+
+  $effect(() => {
+    if (showMarkAsReadMenu) {
+      const handleClickOutside = () => {
+        showMarkAsReadMenu = false;
+      };
+      setTimeout(() => document.addEventListener('click', handleClickOutside), 0);
+      return () => document.removeEventListener('click', handleClickOutside);
+    }
+  });
+</script>
+
+<main>
+  <header>
+    <h1>Feeds</h1>
+    <div class="stats">
+      {#if !loading}
+        <span class="stat">{articles.length} artikler</span>
+        <span class="stat">{unreadCount} uleste</span>
+        {#if newSinceLastVisit > 0}
+          <span class="stat new">{newSinceLastVisit} nye</span>
+        {/if}
+      {/if}
+    </div>
+    <div class="header-actions">
+      <div class="mark-read-dropdown">
+        <button
+          class="mark-read-btn"
+          onclick={(e) => { e.stopPropagation(); showMarkAsReadMenu = !showMarkAsReadMenu; }}
+          disabled={loading || unreadCount === 0}
+        >
+          Merk som lest ▾
+        </button>
+        {#if showMarkAsReadMenu}
+          <div class="dropdown-menu">
+            <button onclick={() => markAllAsRead('today')}>Fra i dag</button>
+            <button onclick={() => markAllAsRead('week')}>Fra siste uke</button>
+            <button onclick={() => markAllAsRead('all')}>Alle</button>
+          </div>
+        {/if}
+      </div>
+      <button class="refresh" onclick={loadFeeds} disabled={loading}>
+        {loading ? '⟳' : '↻'} Oppdater
+      </button>
+    </div>
+  </header>
+
+  <nav class="filters">
+    <button class:active={filter === 'all' && !sourceFilter} onclick={() => { filter = 'all'; sourceFilter = null; }}>
+      Alle
+    </button>
+    <button class:active={filter === 'unread' && !sourceFilter} onclick={() => { filter = 'unread'; sourceFilter = null; }}>
+      Uleste ({unreadCount})
+    </button>
+    <button class="sources-toggle" onclick={() => showSources = !showSources}>
+      Kilder ({feedSources.length}) {showSources ? '▴' : '▾'}
+    </button>
+  </nav>
+
+  {#if showSources}
+    <div class="sources-list">
+      {#each feedSources as source}
+        {@const count = articleCountBySource()[source.name] || 0}
+        <button
+          class="source-item"
+          class:active={sourceFilter === source.name}
+          onclick={() => { sourceFilter = sourceFilter === source.name ? null : source.name; }}
+        >
+          <span class="source-name">{source.name}</span>
+          <span class="source-count">{count}</span>
+        </button>
+      {/each}
+    </div>
+  {/if}
+
+  {#if loading}
+    <div class="loading">
+      <div class="spinner"></div>
+      <p>{loadingStatus}</p>
+    </div>
+  {:else if errors.length > 0}
+    <details class="errors">
+      <summary>{errors.length} feeds kunne ikke lastes</summary>
+      <ul>
+        {#each errors as { source, error }}
+          <li>{source.name}: {error}</li>
+        {/each}
+      </ul>
+    </details>
+  {/if}
+
+  <section class="articles">
+    {#each filteredArticles() as article (article.id)}
+      {@const read = article.id in readArticles}
+      {@const isNew = isNewSinceLastVisit(article)}
+      <article class:read class:new={isNew}>
+        <div class="article-header">
+          <button
+            class="toggle-read"
+            onclick={() => handleToggleRead(article.id)}
+            title={read ? 'Marker som ulest' : 'Marker som lest'}
+          >
+            {read ? '○' : '●'}
+          </button>
+          <div class="meta">
+            <span class="source">{article.source}</span>
+            <span class="date">{formatDate(article.pubDate)}</span>
+            {#if isNew}
+              <span class="new-badge">NY</span>
+            {/if}
+          </div>
+        </div>
+        <h2>
+          <a href={article.link} target="_blank" rel="noopener noreferrer">
+            {article.title}
+          </a>
+        </h2>
+        {#if article.description}
+          <p class="description">{article.description}</p>
+        {/if}
+      </article>
+    {:else}
+      <p class="empty">
+        {#if filter === 'unread'}
+          Ingen uleste artikler
+        {:else}
+          Ingen artikler funnet
+        {/if}
+      </p>
+    {/each}
+  </section>
+</main>
