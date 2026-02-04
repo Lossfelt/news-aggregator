@@ -1,79 +1,42 @@
-import http from 'http';
-import { Readability } from '@mozilla/readability';
-import { JSDOM } from 'jsdom';
-import { YoutubeTranscript } from 'youtube-transcript';
+const { Readability } = require('@mozilla/readability');
+const { JSDOM } = require('jsdom');
+const { YoutubeTranscript } = require('youtube-transcript');
 
-const server = http.createServer(async (req, res) => {
-  // CORS headers
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+exports.handler = async (event) => {
+  const headers = {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Content-Type': 'application/json',
+  };
 
-  if (req.method === 'OPTIONS') {
-    res.writeHead(204);
-    res.end();
-    return;
+  if (event.httpMethod === 'OPTIONS') {
+    return { statusCode: 204, headers };
   }
 
-  const url = new URL(req.url, `http://${req.headers.host}`);
-
-  // Handle /extract endpoint
-  if (url.pathname === '/extract') {
-    return handleExtract(req, res);
-  }
-
-  // Handle proxy endpoint (default)
-  const feedUrl = url.searchParams.get('url');
-
-  if (!feedUrl) {
-    res.writeHead(400, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ error: 'Missing url parameter' }));
-    return;
+  if (event.httpMethod !== 'POST') {
+    return {
+      statusCode: 405,
+      headers,
+      body: JSON.stringify({ success: false, error: 'Method not allowed' }),
+    };
   }
 
   try {
-    const response = await fetch(feedUrl, {
-      headers: {
-        'User-Agent': 'FeedsApp/1.0 (RSS Reader)',
-        Accept: 'application/rss+xml, application/atom+xml, application/xml, text/xml, */*',
-      },
-      redirect: 'follow',
-    });
-
-    const contentType = response.headers.get('content-type') || 'application/xml';
-    const body = await response.text();
-
-    res.writeHead(response.status, {
-      'Content-Type': contentType,
-      'Access-Control-Allow-Origin': '*',
-    });
-    res.end(body);
-  } catch (err) {
-    res.writeHead(500, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ error: err.message }));
-  }
-});
-
-async function handleExtract(req, res) {
-  if (req.method !== 'POST') {
-    res.writeHead(405, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ success: false, error: 'Method not allowed' }));
-    return;
-  }
-
-  try {
-    const body = await getRequestBody(req);
-    const { url, source, title } = JSON.parse(body);
+    const { url, source, title } = JSON.parse(event.body);
 
     if (!url) {
-      res.writeHead(400, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ success: false, error: 'URL is required' }));
-      return;
+      return {
+        statusCode: 400,
+        headers,
+        body: JSON.stringify({ success: false, error: 'URL is required' }),
+      };
     }
 
+    // Detect content type
     const type = detectContentType(url, source);
-    let result;
 
+    let result;
     switch (type) {
       case 'youtube':
         result = await extractYouTube(url, title);
@@ -88,28 +51,26 @@ async function handleExtract(req, res) {
         result = await extractArticle(url, title);
     }
 
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ success: true, ...result }));
+    return {
+      statusCode: 200,
+      headers,
+      body: JSON.stringify({ success: true, ...result }),
+    };
   } catch (error) {
     console.error('Extract error:', error);
-    res.writeHead(500, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ success: false, error: error.message }));
+    return {
+      statusCode: 500,
+      headers,
+      body: JSON.stringify({ success: false, error: error.message }),
+    };
   }
-}
-
-function getRequestBody(req) {
-  return new Promise((resolve, reject) => {
-    let body = '';
-    req.on('data', (chunk) => (body += chunk));
-    req.on('end', () => resolve(body));
-    req.on('error', reject);
-  });
-}
+};
 
 function detectContentType(url, source) {
   const lowerUrl = url.toLowerCase();
   const lowerSource = (source || '').toLowerCase();
 
+  // YouTube detection
   if (
     lowerUrl.includes('youtube.com/watch') ||
     lowerUrl.includes('youtu.be/') ||
@@ -123,6 +84,7 @@ function detectContentType(url, source) {
     return 'bluesky';
   }
 
+  // Podcast detection - common podcast sources
   const podcastSources = ['latent space', 'podcast', 'lex fridman', 'huberman'];
   if (podcastSources.some((p) => lowerSource.includes(p))) {
     return 'podcast';
@@ -166,6 +128,7 @@ async function extractYouTube(url, title) {
       };
     }
 
+    // Combine transcript segments
     const text = transcript.map((segment) => segment.text).join(' ');
 
     return {
@@ -192,7 +155,6 @@ function extractPodcast(url, title) {
 }
 
 async function extractBluesky(url, title) {
-  // Bluesky URLs look like: https://bsky.app/profile/user.bsky.social/post/abc123
   const match = url.match(/bsky\.app\/profile\/([^/]+)\/post\/([^/]+)/);
 
   if (!match) {
@@ -206,12 +168,10 @@ async function extractBluesky(url, title) {
   const [, handle, postId] = match;
 
   try {
-    // Use Bluesky's public API to get post content
     const apiUrl = `https://public.api.bsky.app/xrpc/app.bsky.feed.getPostThread?uri=at://${handle}/app.bsky.feed.post/${postId}&depth=0`;
     const response = await fetch(apiUrl);
 
     if (!response.ok) {
-      // Fallback: try to get content from page
       return await extractArticle(url, title);
     }
 
@@ -276,6 +236,7 @@ async function extractArticle(url, title) {
       };
     }
 
+    // Clean up the text
     const cleanedText = article.textContent
       .replace(/\s+/g, ' ')
       .replace(/\n\s*\n/g, '\n\n')
@@ -294,7 +255,3 @@ async function extractArticle(url, title) {
     };
   }
 }
-
-server.listen(3001, () => {
-  console.log('Proxy server running on http://localhost:3001');
-});

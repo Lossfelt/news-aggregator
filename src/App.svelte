@@ -2,6 +2,7 @@
   import { feedSources, fetchAllFeeds } from './lib/feeds.js';
   import { parseFeed, sortByDate } from './lib/parser.js';
   import { getReadArticles, markAsRead, toggleRead, getLastVisit, updateLastVisit } from './lib/storage.js';
+  import SidePanel from './lib/SidePanel.svelte';
 
   let articles = $state([]);
   let readArticles = $state(getReadArticles());
@@ -13,6 +14,13 @@
   let lastVisit = $state(getLastVisit());
   let showMarkAsReadMenu = $state(false);
   let showSources = $state(false);
+
+  // Side panel state
+  let panelOpen = $state(false);
+  let selectedArticle = $state(null);
+  let extractedContent = $state(null);
+  let extracting = $state(false);
+  let extractError = $state(null);
 
   const articleCountBySource = $derived(() => {
     const counts = {};
@@ -119,6 +127,86 @@
   function isNewSinceLastVisit(article) {
     if (!lastVisit || !article.pubDate) return false;
     return article.pubDate.getTime() > lastVisit;
+  }
+
+  async function extractContent(article) {
+    selectedArticle = article;
+    extractedContent = null;
+    extractError = null;
+    extracting = true;
+    panelOpen = true;
+
+    try {
+      const apiUrl = '/api/extract';
+      const response = await fetch(apiUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          url: article.link,
+          source: article.source,
+          title: article.title,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!data.success) {
+        extractError = data.error || 'Ukjent feil ved henting av innhold';
+        return;
+      }
+
+      if (!data.text) {
+        extractError = data.error || 'Kunne ikke hente innhold fra denne kilden';
+        return;
+      }
+
+      extractedContent = {
+        type: data.type,
+        text: data.text,
+        title: data.title || article.title,
+      };
+    } catch (err) {
+      extractError = `Nettverksfeil: ${err.message}`;
+    } finally {
+      extracting = false;
+    }
+  }
+
+  function closePanel() {
+    panelOpen = false;
+    selectedArticle = null;
+    extractedContent = null;
+    extractError = null;
+  }
+
+  function retryExtract() {
+    if (selectedArticle) {
+      extractContent(selectedArticle);
+    }
+  }
+
+  function copyToClipboard() {
+    if (!extractedContent || !selectedArticle) return;
+
+    const typeLabel = extractedContent.type === 'youtube' ? 'videoen'
+      : extractedContent.type === 'podcast' ? 'podcasten'
+      : extractedContent.type === 'bluesky' ? 'Bluesky-innlegget'
+      : 'artikkelen';
+
+    const prompt = `Oppsummer denne ${typeLabel} på norsk:
+
+Tittel: ${selectedArticle.title}
+Kilde: ${selectedArticle.source}
+Lenke: ${selectedArticle.link}
+
+${extractedContent.text}
+
+Gi meg:
+1. Kort oppsummering (2-3 setninger)
+2. Hovedpunkter (3-5 kulepunkter)
+3. Viktigste innsikter`;
+
+    navigator.clipboard.writeText(prompt);
   }
 
   $effect(() => {
@@ -228,6 +316,13 @@
           >
             {read ? '○' : '●'}
           </button>
+          <button
+            class="extract-btn"
+            onclick={() => extractContent(article)}
+            title="Hent innhold for AI-oppsummering"
+          >
+            ✦
+          </button>
           <div class="meta">
             <span class="source">{article.source}</span>
             <span class="date">{formatDate(article.pubDate)}</span>
@@ -256,3 +351,14 @@
     {/each}
   </section>
 </main>
+
+<SidePanel
+  open={panelOpen}
+  article={selectedArticle}
+  content={extractedContent}
+  loading={extracting}
+  error={extractError}
+  onclose={closePanel}
+  onretry={retryExtract}
+  oncopy={copyToClipboard}
+/>
