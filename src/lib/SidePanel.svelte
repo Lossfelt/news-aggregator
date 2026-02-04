@@ -62,7 +62,11 @@
           <button class="retry-btn" onclick={onretry}>Prøv igjen</button>
           {#if article?.link}
             <p class="fallback-text">
-              Eller <a href={article.link} target="_blank" rel="noopener noreferrer">åpne artikkelen direkte</a>
+              {#if article.link.includes('youtube.com') || article.link.includes('youtu.be')}
+                <a href={article.link} target="_blank" rel="noopener noreferrer">Åpne videoen på YouTube</a> og klikk "Show transcript" under videoen for å kopiere transkripsjonen.
+              {:else}
+                Eller <a href={article.link} target="_blank" rel="noopener noreferrer">åpne artikkelen direkte</a>
+              {/if}
             </p>
           {/if}
         </div>

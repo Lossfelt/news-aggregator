@@ -1,7 +1,7 @@
 import http from 'http';
 import { Readability } from '@mozilla/readability';
 import { JSDOM } from 'jsdom';
-import { YoutubeTranscript } from 'youtube-transcript';
+import { execSync } from 'child_process';
 
 const server = http.createServer(async (req, res) => {
   // CORS headers
@@ -156,9 +156,34 @@ async function extractYouTube(url, title) {
   }
 
   try {
-    const transcript = await YoutubeTranscript.fetchTranscript(videoId);
+    console.log('Using yt-dlp to fetch transcript...');
 
-    if (!transcript || transcript.length === 0) {
+    const videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
+    const os = await import('os');
+    const path = await import('path');
+    const fs = await import('fs');
+
+    // Create temp file path
+    const tempDir = os.tmpdir();
+    const tempFile = path.join(tempDir, `yt-sub-${videoId}`);
+
+    // Download subtitles to temp file
+    try {
+      execSync(
+        `yt-dlp --skip-download --write-auto-sub --write-sub --sub-lang en --sub-format vtt -o "${tempFile}" "${videoUrl}"`,
+        { encoding: 'utf-8', timeout: 60000, maxBuffer: 1024 * 1024, stdio: ['pipe', 'pipe', 'pipe'] }
+      );
+    } catch (e) {
+      // yt-dlp might return non-zero even on success for some warnings
+      console.log('yt-dlp command completed');
+    }
+
+    // Find the subtitle file (could be .en.vtt or .en-orig.vtt etc)
+    const files = fs.readdirSync(tempDir);
+    const subFile = files.find(f => f.startsWith(`yt-sub-${videoId}`) && f.endsWith('.vtt'));
+
+    if (!subFile) {
+      console.log('No subtitle file found');
       return {
         type: 'youtube',
         text: null,
@@ -166,18 +191,64 @@ async function extractYouTube(url, title) {
       };
     }
 
-    const text = transcript.map((segment) => segment.text).join(' ');
+    const subPath = path.join(tempDir, subFile);
+    console.log('Found subtitle file:', subFile);
 
-    return {
-      type: 'youtube',
-      text: text,
-      title: title,
-    };
+    const vttContent = fs.readFileSync(subPath, 'utf-8');
+
+    // Clean up temp file
+    try { fs.unlinkSync(subPath); } catch (e) {}
+
+    // Parse VTT format
+    const lines = vttContent.split('\n');
+    const segments = [];
+    let inCue = false;
+
+    for (const line of lines) {
+      // Skip header, timestamps, and empty lines
+      if (line.startsWith('WEBVTT') || line.startsWith('Kind:') || line.startsWith('Language:')) continue;
+      if (line.match(/^\d{2}:\d{2}/) || line.match(/^NOTE/)) {
+        inCue = true;
+        continue;
+      }
+      if (line.trim() === '') {
+        inCue = false;
+        continue;
+      }
+
+      // This is actual text content
+      const cleanLine = line
+        .replace(/<[^>]+>/g, '') // Remove HTML tags
+        .replace(/&amp;/g, '&')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&nbsp;/g, ' ')
+        .trim();
+
+      if (cleanLine && !segments.includes(cleanLine)) {
+        segments.push(cleanLine);
+      }
+    }
+
+    if (segments.length === 0) {
+      return {
+        type: 'youtube',
+        text: null,
+        error: 'Transkripsjonen var tom',
+      };
+    }
+
+    const text = segments.join(' ').replace(/\s+/g, ' ').trim();
+    console.log('Transcript length:', text.length);
+
+    return { type: 'youtube', text, title };
+
   } catch (error) {
+    console.log('yt-dlp error:', error.message);
     return {
       type: 'youtube',
       text: null,
-      error: `Kunne ikke hente transkripsjon: ${error.message}`,
+      error: 'Kunne ikke hente transkripsjon. Sørg for at yt-dlp er installert (winget install yt-dlp).',
     };
   }
 }

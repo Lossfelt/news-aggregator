@@ -1,6 +1,9 @@
 const { Readability } = require('@mozilla/readability');
 const { JSDOM } = require('jsdom');
-const { YoutubeTranscript } = require('youtube-transcript');
+const { execSync } = require('child_process');
+const fs = require('fs');
+const path = require('path');
+const os = require('os');
 
 exports.handler = async (event) => {
   const headers = {
@@ -70,7 +73,6 @@ function detectContentType(url, source) {
   const lowerUrl = url.toLowerCase();
   const lowerSource = (source || '').toLowerCase();
 
-  // YouTube detection
   if (
     lowerUrl.includes('youtube.com/watch') ||
     lowerUrl.includes('youtu.be/') ||
@@ -79,12 +81,10 @@ function detectContentType(url, source) {
     return 'youtube';
   }
 
-  // Bluesky posts
   if (lowerUrl.includes('bsky.app') || lowerSource.includes('bluesky')) {
     return 'bluesky';
   }
 
-  // Podcast detection - common podcast sources
   const podcastSources = ['latent space', 'podcast', 'lex fridman', 'huberman'];
   if (podcastSources.some((p) => lowerSource.includes(p))) {
     return 'podcast';
@@ -118,9 +118,38 @@ async function extractYouTube(url, title) {
   }
 
   try {
-    const transcript = await YoutubeTranscript.fetchTranscript(videoId);
+    console.log('Using yt-dlp to fetch transcript...');
 
-    if (!transcript || transcript.length === 0) {
+    // Path to bundled yt-dlp binary
+    const ytdlpPath = path.join(__dirname, 'yt-dlp');
+
+    // Make it executable (needed on Lambda)
+    try {
+      fs.chmodSync(ytdlpPath, '755');
+    } catch (e) {
+      console.log('chmod failed (might already be executable):', e.message);
+    }
+
+    const videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
+    const tempDir = os.tmpdir();
+    const tempFile = path.join(tempDir, `yt-sub-${videoId}`);
+
+    // Download subtitles to temp file
+    try {
+      execSync(
+        `"${ytdlpPath}" --skip-download --write-auto-sub --write-sub --sub-lang en --sub-format vtt -o "${tempFile}" "${videoUrl}"`,
+        { encoding: 'utf-8', timeout: 60000, maxBuffer: 1024 * 1024, stdio: ['pipe', 'pipe', 'pipe'] }
+      );
+    } catch (e) {
+      console.log('yt-dlp command completed (may have warnings)');
+    }
+
+    // Find the subtitle file
+    const files = fs.readdirSync(tempDir);
+    const subFile = files.find(f => f.startsWith(`yt-sub-${videoId}`) && f.endsWith('.vtt'));
+
+    if (!subFile) {
+      console.log('No subtitle file found');
       return {
         type: 'youtube',
         text: null,
@@ -128,19 +157,55 @@ async function extractYouTube(url, title) {
       };
     }
 
-    // Combine transcript segments
-    const text = transcript.map((segment) => segment.text).join(' ');
+    const subPath = path.join(tempDir, subFile);
+    console.log('Found subtitle file:', subFile);
 
-    return {
-      type: 'youtube',
-      text: text,
-      title: title,
-    };
+    const vttContent = fs.readFileSync(subPath, 'utf-8');
+
+    // Clean up temp file
+    try { fs.unlinkSync(subPath); } catch (e) {}
+
+    // Parse VTT format
+    const lines = vttContent.split('\n');
+    const segments = [];
+
+    for (const line of lines) {
+      if (line.startsWith('WEBVTT') || line.startsWith('Kind:') || line.startsWith('Language:')) continue;
+      if (line.match(/^\d{2}:\d{2}/) || line.match(/^NOTE/)) continue;
+      if (line.trim() === '') continue;
+
+      const cleanLine = line
+        .replace(/<[^>]+>/g, '')
+        .replace(/&amp;/g, '&')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&nbsp;/g, ' ')
+        .trim();
+
+      if (cleanLine && !segments.includes(cleanLine)) {
+        segments.push(cleanLine);
+      }
+    }
+
+    if (segments.length === 0) {
+      return {
+        type: 'youtube',
+        text: null,
+        error: 'Transkripsjonen var tom',
+      };
+    }
+
+    const text = segments.join(' ').replace(/\s+/g, ' ').trim();
+    console.log('Transcript length:', text.length);
+
+    return { type: 'youtube', text, title };
+
   } catch (error) {
+    console.log('yt-dlp error:', error.message);
     return {
       type: 'youtube',
       text: null,
-      error: `Kunne ikke hente transkripsjon: ${error.message}`,
+      error: 'Kunne ikke hente transkripsjon: ' + error.message,
     };
   }
 }
@@ -236,7 +301,6 @@ async function extractArticle(url, title) {
       };
     }
 
-    // Clean up the text
     const cleanedText = article.textContent
       .replace(/\s+/g, ' ')
       .replace(/\n\s*\n/g, '\n\n')

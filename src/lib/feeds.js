@@ -11,6 +11,7 @@ export const feedSources = [
 
   // YouTube
   { name: 'Matthew Berman', url: 'https://www.youtube.com/feeds/videos.xml?channel_id=UCawZsQWqfGSbCI5yjkdVkTA' },
+  { name: 'Two Minute Papers', url: 'https://www.youtube.com/feeds/videos.xml?channel_id=UCbfYPyITQ-7l4upoX8nvctg' },
 
   // Podcasts
   { name: 'Latent Space Podcast', url: 'https://api.substack.com/feed/podcast/69345.rss' },
