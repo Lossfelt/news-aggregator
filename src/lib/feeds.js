@@ -16,7 +16,7 @@ export const feedSources = [
   // Podcasts
   { name: 'Latent Space Podcast', url: 'https://api.substack.com/feed/podcast/69345.rss' },
   { name: 'Practical AI Podcast', url: 'https://feeds.transistor.fm/practical-ai-machine-learning-data-science-llm' },
-  { name: 'Cognitive Revolution Podcast', url: 'https://api.substack.com/feed/podcast/1084089.rss' },
+  { name: 'Cognitive Revolution Podcast', url: 'https://feeds.megaphone.fm/RINTP3108857801' },
   { name: 'Forward Future Podcast', url: 'https://anchor.fm/s/f7cac464/podcast/rss' },
 
   // Bluesky
