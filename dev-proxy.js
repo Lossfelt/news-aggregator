@@ -1,7 +1,13 @@
 import http from 'http';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { Readability } from '@mozilla/readability';
 import { JSDOM } from 'jsdom';
 import { execSync } from 'child_process';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const SYNC_FILE = path.join(__dirname, '.sync-data.json');
 
 const server = http.createServer(async (req, res) => {
   // CORS headers
@@ -16,6 +22,11 @@ const server = http.createServer(async (req, res) => {
   }
 
   const url = new URL(req.url, `http://${req.headers.host}`);
+
+  // Handle /sync endpoint
+  if (url.pathname === '/sync') {
+    return handleSync(req, res);
+  }
 
   // Handle /extract endpoint
   if (url.pathname === '/extract') {
@@ -53,6 +64,40 @@ const server = http.createServer(async (req, res) => {
     res.end(JSON.stringify({ error: err.message }));
   }
 });
+
+function handleSync(req, res) {
+  if (req.method === 'GET') {
+    try {
+      const data = fs.existsSync(SYNC_FILE)
+        ? JSON.parse(fs.readFileSync(SYNC_FILE, 'utf-8'))
+        : { readArticles: {}, lastVisit: null };
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(data));
+    } catch {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ readArticles: {}, lastVisit: null }));
+    }
+    return;
+  }
+
+  if (req.method === 'PUT') {
+    getRequestBody(req).then((body) => {
+      try {
+        const data = JSON.parse(body);
+        fs.writeFileSync(SYNC_FILE, JSON.stringify(data, null, 2));
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true }));
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    });
+    return;
+  }
+
+  res.writeHead(405, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify({ error: 'Method not allowed' }));
+}
 
 async function handleExtract(req, res) {
   if (req.method !== 'POST') {

@@ -1,7 +1,7 @@
 <script>
   import { feedSources, fetchAllFeeds } from './lib/feeds.js';
   import { parseFeed, sortByDate } from './lib/parser.js';
-  import { getReadArticles, markAsRead, toggleRead, getLastVisit, updateLastVisit } from './lib/storage.js';
+  import { getReadArticles, markAsRead, toggleRead, getLastVisit, updateLastVisit, syncFromServer, syncToServer } from './lib/storage.js';
   import SidePanel from './lib/SidePanel.svelte';
 
   let articles = $state([]);
@@ -55,6 +55,9 @@
     errors = [];
     articles = [];
 
+    // Sync from server before reading local state
+    await syncFromServer();
+
     const { results, errors: fetchErrors } = await fetchAllFeeds((name, success) => {
       loadingStatus = `${success ? '✓' : '✗'} ${name}`;
     });
@@ -82,6 +85,7 @@
   function handleToggleRead(articleId) {
     toggleRead(articleId);
     readArticles = getReadArticles();
+    syncToServer();
   }
 
   function markAllAsRead(timeFilter = 'all') {
@@ -105,6 +109,7 @@
 
     readArticles = getReadArticles();
     showMarkAsReadMenu = false;
+    syncToServer();
   }
 
   function formatDate(date) {

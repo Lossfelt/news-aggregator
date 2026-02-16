@@ -22,5 +22,8 @@ Thumbs.db
 # Logs
 *.log
 
+# Local dev sync data
+.sync-data.json
+
 # Claude Code
 .claude/
