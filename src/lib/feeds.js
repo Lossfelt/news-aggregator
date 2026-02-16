@@ -1,4 +1,4 @@
-export const feedSources = [
+export const defaultSources = [
   // AI/Tech blogs
   { name: 'Google AI Blog', url: 'https://blog.google/technology/ai/rss/' },
   { name: 'AWS Machine Learning', url: 'https://aws.amazon.com/blogs/machine-learning/feed/' },
@@ -38,11 +38,11 @@ export async function fetchFeed(feedSource) {
   return { xml, source: feedSource };
 }
 
-export async function fetchAllFeeds(onProgress) {
+export async function fetchAllFeeds(sources, onProgress) {
   const results = [];
   const errors = [];
 
-  for (const source of feedSources) {
+  for (const source of sources) {
     try {
       const result = await fetchFeed(source);
       results.push(result);

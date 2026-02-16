@@ -1,7 +1,7 @@
 <script>
-  import { feedSources, fetchAllFeeds } from './lib/feeds.js';
+  import { fetchAllFeeds } from './lib/feeds.js';
   import { parseFeed, sortByDate } from './lib/parser.js';
-  import { getReadArticles, markAsRead, toggleRead, getLastVisit, updateLastVisit, syncFromServer, syncToServer } from './lib/storage.js';
+  import { getReadArticles, markAsRead, toggleRead, getLastVisit, updateLastVisit, syncFromServer, syncToServer, getSources, saveSources, addSource as storageAddSource, removeSource as storageRemoveSource, toggleSourceEnabled, getActiveSources } from './lib/storage.js';
   import SidePanel from './lib/SidePanel.svelte';
 
   let articles = $state([]);
@@ -14,6 +14,10 @@
   let lastVisit = $state(getLastVisit());
   let showMarkAsReadMenu = $state(false);
   let showSources = $state(false);
+  let editingSources = $state(false);
+  let newFeedName = $state('');
+  let newFeedUrl = $state('');
+  let sources = $state(getSources());
 
   // Side panel state
   let panelOpen = $state(false);
@@ -57,8 +61,10 @@
 
     // Sync from server before reading local state
     await syncFromServer();
+    sources = getSources();
 
-    const { results, errors: fetchErrors } = await fetchAllFeeds((name, success) => {
+    const activeSources = getActiveSources();
+    const { results, errors: fetchErrors } = await fetchAllFeeds(activeSources, (name, success) => {
       loadingStatus = `${success ? '✓' : '✗'} ${name}`;
     });
 
@@ -109,6 +115,33 @@
 
     readArticles = getReadArticles();
     showMarkAsReadMenu = false;
+    syncToServer();
+  }
+
+  function handleToggleSource(url) {
+    sources = toggleSourceEnabled(url);
+    syncToServer();
+  }
+
+  function handleRemoveSource(url, name) {
+    if (!confirm(`Fjerne ${name}?`)) return;
+    sources = storageRemoveSource(url);
+    syncToServer();
+  }
+
+  function handleAddSource() {
+    const name = newFeedName.trim();
+    const url = newFeedUrl.trim();
+    if (!name || !url) return;
+    try {
+      new URL(url);
+    } catch {
+      alert('Ugyldig URL');
+      return;
+    }
+    sources = storageAddSource(name, url);
+    newFeedName = '';
+    newFeedUrl = '';
     syncToServer();
   }
 
@@ -271,24 +304,78 @@ Gi meg:
     <button class:active={filter === 'unread' && !sourceFilter} onclick={() => { filter = 'unread'; sourceFilter = null; }}>
       Uleste ({unreadCount})
     </button>
-    <button class="sources-toggle" onclick={() => showSources = !showSources}>
-      Kilder ({feedSources.length}) {showSources ? '▴' : '▾'}
+    <button class="sources-toggle" onclick={() => { showSources = !showSources; if (!showSources) editingSources = false; }}>
+      Kilder ({sources.length}) {showSources ? '▴' : '▾'}
     </button>
   </nav>
 
   {#if showSources}
+    <div class="sources-header">
+      <button
+        class="edit-sources-btn"
+        class:active={editingSources}
+        onclick={() => editingSources = !editingSources}
+      >
+        {editingSources ? 'Ferdig' : 'Rediger'}
+      </button>
+    </div>
     <div class="sources-list">
-      {#each feedSources as source}
-        {@const count = articleCountBySource()[source.name] || 0}
-        <button
-          class="source-item"
-          class:active={sourceFilter === source.name}
-          onclick={() => { sourceFilter = sourceFilter === source.name ? null : source.name; }}
-        >
-          <span class="source-name">{source.name}</span>
-          <span class="source-count">{count}</span>
-        </button>
-      {/each}
+      {#if editingSources}
+        {#each sources as source}
+          <div class="source-item editing" class:disabled={!source.enabled}>
+            <button
+              class="source-toggle-btn"
+              class:off={!source.enabled}
+              onclick={() => handleToggleSource(source.url)}
+              title={source.enabled ? 'Deaktiver' : 'Aktiver'}
+            >
+              {source.enabled ? '●' : '○'}
+            </button>
+            <span class="source-name">{source.name}</span>
+            <button
+              class="source-delete-btn"
+              onclick={() => handleRemoveSource(source.url, source.name)}
+              title="Fjern kilde"
+            >
+              ×
+            </button>
+          </div>
+        {/each}
+        <div class="add-source-form">
+          <input
+            class="add-source-input"
+            type="text"
+            placeholder="Navn"
+            bind:value={newFeedName}
+          />
+          <input
+            class="add-source-input"
+            type="url"
+            placeholder="RSS/Atom URL"
+            bind:value={newFeedUrl}
+            onkeydown={(e) => { if (e.key === 'Enter') handleAddSource(); }}
+          />
+          <button
+            class="add-source-btn"
+            onclick={handleAddSource}
+            disabled={!newFeedName.trim() || !newFeedUrl.trim()}
+          >
+            Legg til
+          </button>
+        </div>
+      {:else}
+        {#each sources.filter(s => s.enabled) as source}
+          {@const count = articleCountBySource()[source.name] || 0}
+          <button
+            class="source-item"
+            class:active={sourceFilter === source.name}
+            onclick={() => { sourceFilter = sourceFilter === source.name ? null : source.name; }}
+          >
+            <span class="source-name">{source.name}</span>
+            <span class="source-count">{count}</span>
+          </button>
+        {/each}
+      {/if}
     </div>
   {/if}
 

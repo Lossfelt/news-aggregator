@@ -22,10 +22,12 @@ export default async (req) => {
     try {
       const readArticles = await store.get('read-articles');
       const lastVisit = await store.get('last-visit');
+      const sources = await store.get('sources');
 
       return new Response(JSON.stringify({
         readArticles: readArticles ? JSON.parse(readArticles) : {},
         lastVisit: lastVisit || null,
+        sources: sources ? JSON.parse(sources) : null,
       }), { headers });
     } catch (error) {
       console.error('Sync GET error:', error);
@@ -35,13 +37,16 @@ export default async (req) => {
 
   if (req.method === 'PUT') {
     try {
-      const { readArticles, lastVisit } = await req.json();
+      const { readArticles, lastVisit, sources } = await req.json();
 
       if (readArticles !== undefined) {
         await store.set('read-articles', JSON.stringify(readArticles));
       }
       if (lastVisit !== undefined) {
         await store.set('last-visit', String(lastVisit));
+      }
+      if (sources !== undefined) {
+        await store.set('sources', JSON.stringify(sources));
       }
 
       return new Response(JSON.stringify({ ok: true }), { headers });

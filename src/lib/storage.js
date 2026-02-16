@@ -1,5 +1,8 @@
+import { defaultSources } from './feeds.js';
+
 const READ_ARTICLES_KEY = 'feeds_read_articles';
 const LAST_VISIT_KEY = 'feeds_last_visit';
+const SOURCES_KEY = 'feeds_sources';
 
 export function getReadArticles() {
   try {
@@ -37,6 +40,48 @@ export function toggleRead(articleId) {
   }
 }
 
+// --- Source management ---
+
+export function getSources() {
+  try {
+    const stored = localStorage.getItem(SOURCES_KEY);
+    if (stored) return JSON.parse(stored);
+  } catch { /* fall through */ }
+  // First-time migration: seed from defaults
+  const initial = defaultSources.map(s => ({ ...s, enabled: true }));
+  localStorage.setItem(SOURCES_KEY, JSON.stringify(initial));
+  return initial;
+}
+
+export function saveSources(sources) {
+  localStorage.setItem(SOURCES_KEY, JSON.stringify(sources));
+}
+
+export function addSource(name, url) {
+  const sources = getSources();
+  sources.push({ name, url, enabled: true });
+  saveSources(sources);
+  return sources;
+}
+
+export function removeSource(url) {
+  const sources = getSources().filter(s => s.url !== url);
+  saveSources(sources);
+  return sources;
+}
+
+export function toggleSourceEnabled(url) {
+  const sources = getSources();
+  const source = sources.find(s => s.url === url);
+  if (source) source.enabled = !source.enabled;
+  saveSources(sources);
+  return sources;
+}
+
+export function getActiveSources() {
+  return getSources().filter(s => s.enabled);
+}
+
 export function getLastVisit() {
   try {
     const stored = localStorage.getItem(LAST_VISIT_KEY);
@@ -53,6 +98,7 @@ export function updateLastVisit() {
 export function clearAllData() {
   localStorage.removeItem(READ_ARTICLES_KEY);
   localStorage.removeItem(LAST_VISIT_KEY);
+  localStorage.removeItem(SOURCES_KEY);
 }
 
 export async function syncFromServer() {
@@ -83,6 +129,21 @@ export async function syncFromServer() {
       }
     }
 
+    // Merge sources: union by URL, server wins for duplicates
+    if (server.sources) {
+      const localSources = getSources();
+      const serverMap = new Map(server.sources.map(s => [s.url, s]));
+      const localMap = new Map(localSources.map(s => [s.url, s]));
+      // Start with server sources, then add local-only
+      const mergedSources = [...server.sources];
+      for (const [url, source] of localMap) {
+        if (!serverMap.has(url)) {
+          mergedSources.push(source);
+        }
+      }
+      saveSources(mergedSources);
+    }
+
     // Push merged state back to server so both sides are in sync
     await fetch('/api/sync', {
       method: 'PUT',
@@ -90,6 +151,7 @@ export async function syncFromServer() {
       body: JSON.stringify({
         readArticles: merged,
         lastVisit: localStorage.getItem(LAST_VISIT_KEY),
+        sources: getSources(),
       }),
     });
   } catch (err) {
@@ -105,6 +167,7 @@ export async function syncToServer() {
       body: JSON.stringify({
         readArticles: getReadArticles(),
         lastVisit: localStorage.getItem(LAST_VISIT_KEY),
+        sources: getSources(),
       }),
     });
   } catch (err) {
