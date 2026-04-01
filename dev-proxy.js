@@ -195,7 +195,10 @@ function extractYouTubeId(url) {
   return null;
 }
 
-function httpsRequest(method, url, body) {
+const ANDROID_UA = 'com.google.android.youtube/20.10.38 (Linux; U; Android 14; en_US)';
+const DESKTOP_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
+
+function httpsRequest(method, url, body, userAgent) {
   return new Promise((resolve, reject) => {
     const parsed = new URL(url);
     const req = https.request({
@@ -204,7 +207,7 @@ function httpsRequest(method, url, body) {
       path: parsed.pathname + parsed.search,
       method,
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+        'User-Agent': userAgent || DESKTOP_UA,
         'Accept-Language': 'en-US',
         'Accept-Encoding': 'gzip, deflate',
         ...(body ? { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) } : {}),
@@ -258,19 +261,14 @@ async function extractYouTube(url, title) {
   }
 
   try {
-    const pageRes = await httpsRequest('GET', `https://www.youtube.com/watch?v=${videoId}`);
-    const apiKeyMatch = pageRes.body.match(/"INNERTUBE_API_KEY":\s*"([a-zA-Z0-9_-]+)"/);
-    if (!apiKeyMatch) {
-      return { type: 'youtube', text: null, error: 'Kunne ikke hente API-nøkkel fra YouTube' };
-    }
-
     const playerBody = JSON.stringify({
-      context: { client: { clientName: 'ANDROID', clientVersion: '20.10.38' } },
+      context: { client: { clientName: 'ANDROID', clientVersion: '20.10.38', androidSdkVersion: 34, hl: 'en', gl: 'US' } },
       videoId,
     });
     const playerRes = await httpsRequest('POST',
-      `https://www.youtube.com/youtubei/v1/player?key=${apiKeyMatch[1]}`,
-      playerBody
+      'https://www.youtube.com/youtubei/v1/player?key=AIzaSyA8eiZmM1FaDVjRy-df2KTyQ_vz_yYM39w',
+      playerBody,
+      ANDROID_UA
     );
     const player = JSON.parse(playerRes.body);
 
