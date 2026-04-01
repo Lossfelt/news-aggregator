@@ -1,9 +1,7 @@
 const { Readability } = require('@mozilla/readability');
 const { JSDOM } = require('jsdom');
-const { execSync } = require('child_process');
-const fs = require('fs');
-const path = require('path');
-const os = require('os');
+const https = require('https');
+const zlib = require('zlib');
 
 exports.handler = async (event) => {
   const headers = {
@@ -26,7 +24,7 @@ exports.handler = async (event) => {
   }
 
   try {
-    const { url, source, title } = JSON.parse(event.body);
+    const { url, source, title, feedDescription } = JSON.parse(event.body);
 
     if (!url) {
       return {
@@ -45,13 +43,13 @@ exports.handler = async (event) => {
         result = await extractYouTube(url, title);
         break;
       case 'podcast':
-        result = extractPodcast(url, title);
+        result = extractPodcast(url, title, feedDescription);
         break;
       case 'bluesky':
         result = await extractBluesky(url, title);
         break;
       default:
-        result = await extractArticle(url, title);
+        result = await extractArticle(url, title, feedDescription);
     }
 
     return {
@@ -106,6 +104,62 @@ function extractYouTubeId(url) {
   return null;
 }
 
+function httpsRequest(method, url, body) {
+  return new Promise((resolve, reject) => {
+    const parsed = new URL(url);
+    const req = https.request({
+      hostname: parsed.hostname,
+      port: 443,
+      path: parsed.pathname + parsed.search,
+      method,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+        'Accept-Language': 'en-US',
+        'Accept-Encoding': 'gzip, deflate',
+        ...(body ? { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) } : {}),
+      }
+    }, (res) => {
+      const chunks = [];
+      res.on('data', chunk => chunks.push(chunk));
+      res.on('end', () => {
+        const raw = Buffer.concat(chunks);
+        let text;
+        try {
+          const enc = res.headers['content-encoding'];
+          if (enc === 'gzip') text = zlib.gunzipSync(raw).toString();
+          else if (enc === 'br') text = zlib.brotliDecompressSync(raw).toString();
+          else text = raw.toString();
+        } catch { text = raw.toString(); }
+        resolve({ status: res.statusCode, body: text });
+      });
+    });
+    req.on('error', reject);
+    if (body) req.write(body);
+    req.end();
+  });
+}
+
+function decodeEntities(str) {
+  return str
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'");
+}
+
+function parseCaptionXml(xml) {
+  const segments = [];
+  const isMillis = xml.includes('<p ');
+  const re = /<(?:text|p)\s+[^>]*?(?:start|t)="([^"]*)"[^>]*?(?:dur|d)="([^"]*)"[^>]*>(.*?)<\/(?:text|p)>/gs;
+  let m;
+  while ((m = re.exec(xml)) !== null) {
+    const text = decodeEntities(m[3].replace(/<[^>]*>/g, '').trim());
+    if (text) segments.push(text);
+  }
+  return segments;
+}
+
 async function extractYouTube(url, title) {
   const videoId = extractYouTubeId(url);
 
@@ -118,90 +172,52 @@ async function extractYouTube(url, title) {
   }
 
   try {
-    console.log('Using yt-dlp to fetch transcript...');
-
-    // Path to bundled yt-dlp binary
-    const ytdlpPath = path.join(__dirname, 'yt-dlp');
-
-    // Make it executable (needed on Lambda)
-    try {
-      fs.chmodSync(ytdlpPath, '755');
-    } catch (e) {
-      console.log('chmod failed (might already be executable):', e.message);
+    // Fetch YouTube page to get API key
+    const pageRes = await httpsRequest('GET', `https://www.youtube.com/watch?v=${videoId}`);
+    const apiKeyMatch = pageRes.body.match(/"INNERTUBE_API_KEY":\s*"([a-zA-Z0-9_-]+)"/);
+    if (!apiKeyMatch) {
+      return { type: 'youtube', text: null, error: 'Kunne ikke hente API-nøkkel fra YouTube' };
     }
 
-    const videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
-    const tempDir = os.tmpdir();
-    const tempFile = path.join(tempDir, `yt-sub-${videoId}`);
+    // Call innertube player API with ANDROID client (avoids PoToken protection on caption URLs)
+    const playerBody = JSON.stringify({
+      context: { client: { clientName: 'ANDROID', clientVersion: '20.10.38' } },
+      videoId,
+    });
+    const playerRes = await httpsRequest('POST',
+      `https://www.youtube.com/youtubei/v1/player?key=${apiKeyMatch[1]}`,
+      playerBody
+    );
+    const player = JSON.parse(playerRes.body);
 
-    // Download subtitles to temp file
-    try {
-      execSync(
-        `"${ytdlpPath}" --skip-download --write-auto-sub --write-sub --sub-lang en --sub-format vtt -o "${tempFile}" "${videoUrl}"`,
-        { encoding: 'utf-8', timeout: 60000, maxBuffer: 1024 * 1024, stdio: ['pipe', 'pipe', 'pipe'] }
-      );
-    } catch (e) {
-      console.log('yt-dlp command completed (may have warnings)');
+    if (player.playabilityStatus?.status !== 'OK') {
+      return { type: 'youtube', text: null, error: `Video ikke tilgjengelig: ${player.playabilityStatus?.reason || 'ukjent feil'}` };
     }
 
-    // Find the subtitle file
-    const files = fs.readdirSync(tempDir);
-    const subFile = files.find(f => f.startsWith(`yt-sub-${videoId}`) && f.endsWith('.vtt'));
-
-    if (!subFile) {
-      console.log('No subtitle file found');
-      return {
-        type: 'youtube',
-        text: null,
-        error: 'Ingen transkripsjon tilgjengelig for denne videoen',
-      };
+    const captionTracks = player.captions?.playerCaptionsTracklistRenderer?.captionTracks;
+    if (!captionTracks || captionTracks.length === 0) {
+      return { type: 'youtube', text: null, error: 'Ingen transkripsjon tilgjengelig for denne videoen' };
     }
 
-    const subPath = path.join(tempDir, subFile);
-    console.log('Found subtitle file:', subFile);
+    // Prefer manual English, then any English, then first available
+    const track = captionTracks.find(t => t.languageCode === 'en' && t.kind !== 'asr')
+      || captionTracks.find(t => t.languageCode === 'en')
+      || captionTracks[0];
 
-    const vttContent = fs.readFileSync(subPath, 'utf-8');
-
-    // Clean up temp file
-    try { fs.unlinkSync(subPath); } catch (e) {}
-
-    // Parse VTT format
-    const lines = vttContent.split('\n');
-    const segments = [];
-
-    for (const line of lines) {
-      if (line.startsWith('WEBVTT') || line.startsWith('Kind:') || line.startsWith('Language:')) continue;
-      if (line.match(/^\d{2}:\d{2}/) || line.match(/^NOTE/)) continue;
-      if (line.trim() === '') continue;
-
-      const cleanLine = line
-        .replace(/<[^>]+>/g, '')
-        .replace(/&amp;/g, '&')
-        .replace(/&lt;/g, '<')
-        .replace(/&gt;/g, '>')
-        .replace(/&nbsp;/g, ' ')
-        .trim();
-
-      if (cleanLine && !segments.includes(cleanLine)) {
-        segments.push(cleanLine);
-      }
+    const captionRes = await httpsRequest('GET', track.baseUrl);
+    if (!captionRes.body || captionRes.body.length === 0) {
+      return { type: 'youtube', text: null, error: 'Kunne ikke laste ned undertekster' };
     }
 
+    const segments = parseCaptionXml(captionRes.body);
     if (segments.length === 0) {
-      return {
-        type: 'youtube',
-        text: null,
-        error: 'Transkripsjonen var tom',
-      };
+      return { type: 'youtube', text: null, error: 'Transkripsjonen var tom' };
     }
 
     const text = segments.join(' ').replace(/\s+/g, ' ').trim();
-    console.log('Transcript length:', text.length);
-
-    return { type: 'youtube', text, title };
+    return { type: 'youtube', text, title: player.videoDetails?.title || title };
 
   } catch (error) {
-    console.log('yt-dlp error:', error.message);
     return {
       type: 'youtube',
       text: null,
@@ -210,7 +226,15 @@ async function extractYouTube(url, title) {
   }
 }
 
-function extractPodcast(url, title) {
+function extractPodcast(url, title, feedDescription) {
+  if (feedDescription) {
+    return {
+      type: 'podcast',
+      text: feedDescription,
+      title,
+    };
+  }
+
   return {
     type: 'podcast',
     text: null,
@@ -265,7 +289,7 @@ async function extractBluesky(url, title) {
   }
 }
 
-async function extractArticle(url, title) {
+async function extractArticle(url, title, feedDescription) {
   try {
     const response = await fetch(url, {
       headers: {
@@ -294,6 +318,13 @@ async function extractArticle(url, title) {
     const article = reader.parse();
 
     if (!article || !article.textContent) {
+      if (feedDescription) {
+        return {
+          type: 'article',
+          text: feedDescription,
+          title,
+        };
+      }
       return {
         type: 'article',
         text: null,
@@ -312,6 +343,13 @@ async function extractArticle(url, title) {
       title: article.title || title,
     };
   } catch (error) {
+    if (feedDescription) {
+      return {
+        type: 'article',
+        text: feedDescription,
+        title,
+      };
+    }
     return {
       type: 'article',
       text: null,

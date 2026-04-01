@@ -15,6 +15,11 @@ export default defineConfig({
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api\/extract/, '/extract'),
       },
+      '/api/summarize': {
+        target: 'http://localhost:3001',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api\/summarize/, '/summarize'),
+      },
       '/api/sync': {
         target: 'http://localhost:3001',
         changeOrigin: true,

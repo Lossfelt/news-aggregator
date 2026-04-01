@@ -5,12 +5,16 @@
     content = null,
     loading = false,
     error = null,
+    summary = null,
+    summarizing = false,
+    summaryError = null,
     onclose = () => {},
     onretry = () => {},
     oncopy = () => {},
   } = $props();
 
   let copied = $state(false);
+  let showFullText = $state(false);
 
   function handleCopy() {
     oncopy();
@@ -38,6 +42,13 @@
         return 'Artikkel';
     }
   }
+
+  // Reset showFullText when panel content changes
+  $effect(() => {
+    if (content) {
+      showFullText = false;
+    }
+  });
 </script>
 
 <svelte:window onkeydown={handleKeydown} />
@@ -75,9 +86,33 @@
           <span class="content-type">{getTypeLabel(content.type)}</span>
           <span class="content-source">{article?.source}</span>
         </div>
-        <div class="content-text">
-          <pre>{content.text}</pre>
-        </div>
+
+        {#if summarizing}
+          <div class="summary-section">
+            <div class="summary-loading">
+              <div class="spinner small"></div>
+              <span>Oppsummerer...</span>
+            </div>
+          </div>
+        {:else if summary}
+          <div class="summary-section">
+            <h3 class="summary-heading">Oppsummering</h3>
+            <div class="summary-text">{summary}</div>
+            <button class="toggle-btn" onclick={() => showFullText = !showFullText}>
+              {showFullText ? 'Skjul full tekst' : 'Vis full tekst'}
+            </button>
+          </div>
+        {:else if summaryError}
+          <div class="summary-section">
+            <p class="summary-error">{summaryError}</p>
+          </div>
+        {/if}
+
+        {#if !summary || showFullText}
+          <div class="content-text">
+            <pre>{content.text}</pre>
+          </div>
+        {/if}
       {:else}
         <p class="panel-empty">Ingen innhold å vise</p>
       {/if}
@@ -92,3 +127,64 @@
     {/if}
   </aside>
 {/if}
+
+<style>
+  .summary-section {
+    margin-bottom: 1rem;
+    padding: 0.75rem;
+    background: #f0f7ff;
+    border-radius: 8px;
+    border-left: 3px solid #3b82f6;
+  }
+
+  .summary-heading {
+    margin: 0 0 0.5rem 0;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: #1e40af;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .summary-text {
+    font-size: 0.9rem;
+    line-height: 1.6;
+    color: #1e293b;
+    white-space: pre-wrap;
+  }
+
+  .summary-loading {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    color: #6b7280;
+    font-size: 0.85rem;
+  }
+
+  .spinner.small {
+    width: 16px;
+    height: 16px;
+    border-width: 2px;
+  }
+
+  .summary-error {
+    color: #dc2626;
+    font-size: 0.85rem;
+    margin: 0;
+  }
+
+  .toggle-btn {
+    margin-top: 0.75rem;
+    padding: 0.35rem 0.75rem;
+    background: none;
+    border: 1px solid #93c5fd;
+    border-radius: 4px;
+    color: #2563eb;
+    cursor: pointer;
+    font-size: 0.8rem;
+  }
+
+  .toggle-btn:hover {
+    background: #dbeafe;
+  }
+</style>

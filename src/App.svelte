@@ -25,6 +25,9 @@
   let extractedContent = $state(null);
   let extracting = $state(false);
   let extractError = $state(null);
+  let summary = $state(null);
+  let summarizing = $state(false);
+  let summaryError = $state(null);
 
   const articleCountBySource = $derived(() => {
     const counts = {};
@@ -183,6 +186,7 @@
           url: article.link,
           source: article.source,
           title: article.title,
+          feedDescription: article.fullDescription || null,
         }),
       });
 
@@ -203,10 +207,42 @@
         text: data.text,
         title: data.title || article.title,
       };
+
+      // Auto-summarize if text is long (more than ~2 paragraphs)
+      if (data.text && data.text.length > 500) {
+        summarizeContent(data.text, data.title || article.title, data.type);
+      }
     } catch (err) {
       extractError = `Nettverksfeil: ${err.message}`;
     } finally {
       extracting = false;
+    }
+  }
+
+  async function summarizeContent(text, title, type) {
+    summary = null;
+    summaryError = null;
+    summarizing = true;
+
+    try {
+      const response = await fetch('/api/summarize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, title, type }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok || !data.summary) {
+        summaryError = data.error || 'Kunne ikke oppsummere';
+        return;
+      }
+
+      summary = data.summary;
+    } catch (err) {
+      summaryError = `Feil ved oppsummering: ${err.message}`;
+    } finally {
+      summarizing = false;
     }
   }
 
@@ -215,6 +251,9 @@
     selectedArticle = null;
     extractedContent = null;
     extractError = null;
+    summary = null;
+    summaryError = null;
+    summarizing = false;
   }
 
   function retryExtract() {
@@ -450,6 +489,9 @@ Gi meg:
   content={extractedContent}
   loading={extracting}
   error={extractError}
+  {summary}
+  {summarizing}
+  {summaryError}
   onclose={closePanel}
   onretry={retryExtract}
   oncopy={copyToClipboard}

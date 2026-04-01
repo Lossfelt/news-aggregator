@@ -42,11 +42,21 @@ function parseRSSItem(item, source) {
     .replace(/&quot;/g, '"')
     .substring(0, 300);
 
+  const fullDescription = description
+    .replace(/<[^>]*>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .trim();
+
   return {
     id: generateId(title, link, pubDateStr),
     title,
     link,
     description: cleanDescription,
+    fullDescription: fullDescription.length > 300 ? fullDescription : undefined,
     pubDate,
     source: source.name,
   };
@@ -70,11 +80,21 @@ function parseAtomEntry(entry, source) {
     .replace(/&quot;/g, '"')
     .substring(0, 300);
 
+  const fullDescription = description
+    .replace(/<[^>]*>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .trim();
+
   return {
     id: generateId(title, link, pubDateStr),
     title,
     link,
     description: cleanDescription,
+    fullDescription: fullDescription.length > 300 ? fullDescription : undefined,
     pubDate,
     source: source.name,
   };
