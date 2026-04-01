@@ -389,49 +389,7 @@ async function extractArticle(url, title, feedDescription) {
   }
 }
 
-const MODELS = [
-  'stepfun/step-3.5-flash:free',
-  'google/gemma-3-12b-it:free',
-  'google/gemma-3-27b-it:free',
-  'meta-llama/llama-3.2-3b-instruct:free',
-];
-
-const MODEL_TIMEOUT_MS = 5000;
-
-async function callModel(model, prompt, apiKey) {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), MODEL_TIMEOUT_MS);
-
-  try {
-    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-        'HTTP-Referer': 'http://localhost:5173',
-        'X-Title': 'Feeds',
-      },
-      body: JSON.stringify({
-        model,
-        messages: [{ role: 'user', content: prompt }],
-      }),
-      signal: controller.signal,
-    });
-
-    if (!response.ok) {
-      const errBody = await response.text();
-      throw new Error(`HTTP ${response.status}: ${errBody}`);
-    }
-
-    const data = await response.json();
-    const summary = data.choices?.[0]?.message?.content;
-    if (!summary) throw new Error('Tomt svar');
-
-    return summary;
-  } finally {
-    clearTimeout(timeout);
-  }
-}
+const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent';
 
 async function handleSummarize(req, res) {
   if (req.method !== 'POST') {
@@ -441,20 +399,19 @@ async function handleSummarize(req, res) {
   }
 
   try {
-    // Load .env file for local development
     const { readFileSync } = await import('fs');
-    let apiKey = process.env.OPENROUTER_API_KEY;
+    let apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
       try {
         const envContent = readFileSync('.env', 'utf-8');
-        const match = envContent.match(/OPENROUTER_API_KEY=(.+)/);
+        const match = envContent.match(/GEMINI_API_KEY=(.+)/);
         if (match) apiKey = match[1].trim();
       } catch {}
     }
 
     if (!apiKey) {
       res.writeHead(500, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: 'OPENROUTER_API_KEY ikke konfigurert' }));
+      res.end(JSON.stringify({ error: 'GEMINI_API_KEY ikke konfigurert' }));
       return;
     }
 
@@ -475,20 +432,37 @@ async function handleSummarize(req, res) {
     const truncatedText = text.length > 15000 ? text.substring(0, 15000) + '...' : text;
     const prompt = `Oppsummer ${typeLabel} på norsk.\n\nTittel: ${title}\n\n${truncatedText}\n\nGi meg:\n1. Kort oppsummering (2-3 setninger)\n2. Hovedpunkter (3-5 kulepunkter)\n3. Viktigste innsikter`;
 
-    for (const model of MODELS) {
-      try {
-        console.log(`Prøver modell: ${model}`);
-        const summary = await callModel(model, prompt, apiKey);
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ summary, model }));
-        return;
-      } catch (err) {
-        console.log(`${model} feilet: ${err.message}`);
-      }
+    const response = await fetch(GEMINI_URL, {
+      method: 'POST',
+      headers: {
+        'x-goog-api-key': apiKey,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: { maxOutputTokens: 1024 },
+      }),
+    });
+
+    if (!response.ok) {
+      const errBody = await response.text();
+      console.error('Gemini error:', response.status, errBody);
+      res.writeHead(502, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: `Gemini-feil: HTTP ${response.status}` }));
+      return;
     }
 
-    res.writeHead(502, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ error: 'Ingen tilgjengelige modeller kunne oppsummere akkurat nå. Prøv igjen om litt.' }));
+    const data = await response.json();
+    const summary = data.candidates?.[0]?.content?.parts?.[0]?.text;
+
+    if (!summary) {
+      res.writeHead(502, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Tomt svar fra Gemini' }));
+      return;
+    }
+
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ summary }));
   } catch (error) {
     console.error('Summarize error:', error);
     res.writeHead(500, { 'Content-Type': 'application/json' });
