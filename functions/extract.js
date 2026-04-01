@@ -106,8 +106,9 @@ function extractYouTubeId(url) {
 
 const ANDROID_UA = 'com.google.android.youtube/20.10.38 (Linux; U; Android 14; en_US)';
 const DESKTOP_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
+const YT_CONSENT_COOKIE = 'SOCS=CAISNQgDEitib3FfaWRlbnRpdHlmcm9udGVuZHVpc2VydmVyXzIwMjMwODI5LjA3X3AxGgJlbiACGgYIgJnOqQY';
 
-function httpsRequest(method, url, body, userAgent) {
+function httpsRequest(method, url, body, extraHeaders) {
   return new Promise((resolve, reject) => {
     const parsed = new URL(url);
     const req = https.request({
@@ -116,10 +117,11 @@ function httpsRequest(method, url, body, userAgent) {
       path: parsed.pathname + parsed.search,
       method,
       headers: {
-        'User-Agent': userAgent || DESKTOP_UA,
+        'User-Agent': DESKTOP_UA,
         'Accept-Language': 'en-US',
         'Accept-Encoding': 'gzip, deflate',
         ...(body ? { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) } : {}),
+        ...extraHeaders,
       }
     }, (res) => {
       const chunks = [];
@@ -184,7 +186,7 @@ async function extractYouTube(url, title) {
     const playerRes = await httpsRequest('POST',
       'https://www.youtube.com/youtubei/v1/player?key=AIzaSyA8eiZmM1FaDVjRy-df2KTyQ_vz_yYM39w',
       playerBody,
-      ANDROID_UA
+      { 'User-Agent': ANDROID_UA, 'Cookie': YT_CONSENT_COOKIE }
     );
     const player = JSON.parse(playerRes.body);
 
@@ -202,7 +204,7 @@ async function extractYouTube(url, title) {
       || captionTracks.find(t => t.languageCode === 'en')
       || captionTracks[0];
 
-    const captionRes = await httpsRequest('GET', track.baseUrl);
+    const captionRes = await httpsRequest('GET', track.baseUrl, null, { 'User-Agent': ANDROID_UA });
     if (!captionRes.body || captionRes.body.length === 0) {
       return { type: 'youtube', text: null, error: 'Kunne ikke laste ned undertekster' };
     }
