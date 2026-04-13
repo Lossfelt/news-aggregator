@@ -30,6 +30,23 @@
     }
   }
 
+  function renderMarkdown(text) {
+    if (!text) return '';
+    // Escape HTML first (defense-in-depth — LLM output shouldn't contain markup)
+    let s = text
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+
+    // Convert **bold** to <strong>
+    s = s.replace(/\*\*([^*]+?)\*\*/g, '<strong>$1</strong>');
+
+    // Replace markdown bullets at line start with a bullet character
+    s = s.replace(/^[ \t]*[*\-][ \t]+/gm, '• ');
+
+    return s;
+  }
+
   function getTypeLabel(type) {
     switch (type) {
       case 'youtube':
@@ -97,7 +114,7 @@
         {:else if summary}
           <div class="summary-section">
             <h3 class="summary-heading">Oppsummering</h3>
-            <div class="summary-text">{summary}</div>
+            <div class="summary-text">{@html renderMarkdown(summary)}</div>
             <button class="toggle-btn" onclick={() => showFullText = !showFullText}>
               {showFullText ? 'Skjul full tekst' : 'Vis full tekst'}
             </button>
