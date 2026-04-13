@@ -15,6 +15,40 @@ function getAttrContent(element, selector, attr) {
   return el ? el.getAttribute(attr) || '' : '';
 }
 
+function decodeHtmlEntities(str) {
+  return str
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => String.fromCodePoint(parseInt(hex, 16)))
+    .replace(/&#(\d+);/g, (_, dec) => String.fromCodePoint(parseInt(dec, 10)));
+}
+
+function cleanHtmlText(html, { preserveLineBreaks = false } = {}) {
+  let s = html || '';
+  if (preserveLineBreaks) {
+    // Convert block-level tags and <br> to newlines before stripping
+    s = s
+      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/<\/(p|div|li|h[1-6]|tr)>/gi, '\n')
+      .replace(/<\/(ul|ol|blockquote)>/gi, '\n\n');
+  }
+  s = s.replace(/<[^>]*>/g, '');
+  s = decodeHtmlEntities(s);
+  // Remove invisible formatting characters (word joiner, zero-width spaces, etc.)
+  s = s.replace(/[\u2060\u200B-\u200D\uFEFF]/g, '');
+  if (preserveLineBreaks) {
+    // Collapse spaces/tabs only (keep newlines), then cap consecutive newlines
+    s = s.replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').replace(/^\s+|\s+$/g, '');
+  } else {
+    s = s.replace(/\s+/g, ' ').trim();
+  }
+  return s;
+}
+
 function parseDate(dateStr) {
   if (!dateStr) return null;
   const date = new Date(dateStr);
@@ -39,24 +73,8 @@ function parseRSSItem(item, source) {
   const pubDateStr = getTextContent(item, 'pubDate') || getTextContent(item, 'published') || getTextContent(item, 'date');
   const pubDate = parseDate(pubDateStr);
 
-  // Clean HTML from description
-  const cleanDescription = description
-    .replace(/<[^>]*>/g, '')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .substring(0, 300);
-
-  const fullDescription = description
-    .replace(/<[^>]*>/g, '')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .trim();
+  const cleanDescription = cleanHtmlText(description).substring(0, 300);
+  const fullDescription = cleanHtmlText(description, { preserveLineBreaks: true });
 
   return {
     id: generateId(title, link, pubDateStr),
@@ -81,23 +99,8 @@ function parseAtomEntry(entry, source) {
   const pubDateStr = getTextContent(entry, 'published') || getTextContent(entry, 'updated');
   const pubDate = parseDate(pubDateStr);
 
-  const cleanDescription = description
-    .replace(/<[^>]*>/g, '')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .substring(0, 300);
-
-  const fullDescription = description
-    .replace(/<[^>]*>/g, '')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .trim();
+  const cleanDescription = cleanHtmlText(description).substring(0, 300);
+  const fullDescription = cleanHtmlText(description, { preserveLineBreaks: true });
 
   return {
     id: generateId(title, link, pubDateStr),
