@@ -3,6 +3,13 @@ function getTextContent(element, selector) {
   return el ? el.textContent?.trim() || '' : '';
 }
 
+function getTextByTagName(element, tagName) {
+  // Works for namespaced tags like "media:description" (getElementsByTagName
+  // matches the qualified name, unlike querySelector which treats : as CSS pseudo).
+  const els = element.getElementsByTagName(tagName);
+  return els.length > 0 ? els[0].textContent?.trim() || '' : '';
+}
+
 function getAttrContent(element, selector, attr) {
   const el = element.querySelector(selector);
   return el ? el.getAttribute(attr) || '' : '';
@@ -67,7 +74,10 @@ function parseAtomEntry(entry, source) {
   const link = getAttrContent(entry, 'link[rel="alternate"]', 'href') ||
                getAttrContent(entry, 'link', 'href') ||
                getTextContent(entry, 'link');
-  const description = getTextContent(entry, 'summary') || getTextContent(entry, 'content');
+  // YouTube feeds use media:description (namespaced); fall back to standard Atom fields
+  const description = getTextByTagName(entry, 'media:description') ||
+                      getTextContent(entry, 'summary') ||
+                      getTextContent(entry, 'content');
   const pubDateStr = getTextContent(entry, 'published') || getTextContent(entry, 'updated');
   const pubDate = parseDate(pubDateStr);
 

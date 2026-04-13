@@ -127,7 +127,7 @@ async function handleExtract(req, res) {
 
     switch (type) {
       case 'youtube':
-        result = await extractYouTube(url, title);
+        result = await extractYouTube(url, title, feedDescription);
         break;
       case 'podcast':
         result = extractPodcast(url, title, feedDescription);
@@ -255,7 +255,71 @@ function parseCaptionXml(xml) {
   return segments;
 }
 
-async function extractYouTube(url, title) {
+async function tryYouTubeInnertube(videoId) {
+  const playerBody = JSON.stringify({
+    context: { client: { clientName: 'ANDROID', clientVersion: '20.10.38', androidSdkVersion: 34, hl: 'en', gl: 'US' } },
+    videoId,
+  });
+  const playerRes = await httpsRequest('POST',
+    'https://www.youtube.com/youtubei/v1/player?key=AIzaSyA8eiZmM1FaDVjRy-df2KTyQ_vz_yYM39w',
+    playerBody,
+    { 'User-Agent': ANDROID_UA, 'Cookie': YT_CONSENT_COOKIE }
+  );
+  const player = JSON.parse(playerRes.body);
+
+  if (player.playabilityStatus?.status !== 'OK') {
+    throw new Error(player.playabilityStatus?.reason || 'ikke tilgjengelig');
+  }
+
+  const captionTracks = player.captions?.playerCaptionsTracklistRenderer?.captionTracks;
+  if (!captionTracks || captionTracks.length === 0) throw new Error('ingen captions');
+
+  const track = captionTracks.find(t => t.languageCode === 'en' && t.kind !== 'asr')
+    || captionTracks.find(t => t.languageCode === 'en')
+    || captionTracks[0];
+
+  const captionRes = await httpsRequest('GET', track.baseUrl, null, { 'User-Agent': ANDROID_UA });
+  if (!captionRes.body || captionRes.body.length === 0) throw new Error('tomt caption-svar');
+
+  const segments = parseCaptionXml(captionRes.body);
+  if (segments.length === 0) throw new Error('tomme segmenter');
+
+  return {
+    text: segments.join(' ').replace(/\s+/g, ' ').trim(),
+    title: player.videoDetails?.title,
+  };
+}
+
+async function tryYouTubeSupadata(videoId) {
+  const { readFileSync } = await import('fs');
+  let apiKey = process.env.SUPADATA_API_KEY;
+  if (!apiKey) {
+    try {
+      const envContent = readFileSync('.env', 'utf-8');
+      const match = envContent.match(/SUPADATA_API_KEY=(.+)/);
+      if (match) apiKey = match[1].trim();
+    } catch {}
+  }
+  if (!apiKey) throw new Error('SUPADATA_API_KEY ikke satt');
+
+  const response = await fetch(
+    `https://api.supadata.ai/v1/transcript?url=https://www.youtube.com/watch?v=${videoId}`,
+    { headers: { 'x-api-key': apiKey } }
+  );
+
+  if (!response.ok) throw new Error(`Supadata HTTP ${response.status}`);
+
+  const data = await response.json();
+  if (!data.content || !Array.isArray(data.content) || data.content.length === 0) {
+    throw new Error('tomt Supadata-svar');
+  }
+
+  return {
+    text: data.content.map(s => s.text).join(' ').replace(/\s+/g, ' ').trim(),
+  };
+}
+
+async function extractYouTube(url, title, feedDescription) {
   const videoId = extractYouTubeId(url);
 
   if (!videoId) {
@@ -263,45 +327,28 @@ async function extractYouTube(url, title) {
   }
 
   try {
-    const playerBody = JSON.stringify({
-      context: { client: { clientName: 'ANDROID', clientVersion: '20.10.38', androidSdkVersion: 34, hl: 'en', gl: 'US' } },
-      videoId,
-    });
-    const playerRes = await httpsRequest('POST',
-      'https://www.youtube.com/youtubei/v1/player?key=AIzaSyA8eiZmM1FaDVjRy-df2KTyQ_vz_yYM39w',
-      playerBody,
-      { 'User-Agent': ANDROID_UA, 'Cookie': YT_CONSENT_COOKIE }
-    );
-    const player = JSON.parse(playerRes.body);
-
-    if (player.playabilityStatus?.status !== 'OK') {
-      return { type: 'youtube', text: null, error: `Video ikke tilgjengelig: ${player.playabilityStatus?.reason || 'ukjent feil'}` };
-    }
-
-    const captionTracks = player.captions?.playerCaptionsTracklistRenderer?.captionTracks;
-    if (!captionTracks || captionTracks.length === 0) {
-      return { type: 'youtube', text: null, error: 'Ingen transkripsjon tilgjengelig for denne videoen' };
-    }
-
-    const track = captionTracks.find(t => t.languageCode === 'en' && t.kind !== 'asr')
-      || captionTracks.find(t => t.languageCode === 'en')
-      || captionTracks[0];
-
-    const captionRes = await httpsRequest('GET', track.baseUrl, null, { 'User-Agent': ANDROID_UA });
-    if (!captionRes.body || captionRes.body.length === 0) {
-      return { type: 'youtube', text: null, error: 'Kunne ikke laste ned undertekster' };
-    }
-
-    const segments = parseCaptionXml(captionRes.body);
-    if (segments.length === 0) {
-      return { type: 'youtube', text: null, error: 'Transkripsjonen var tom' };
-    }
-
-    const text = segments.join(' ').replace(/\s+/g, ' ').trim();
-    return { type: 'youtube', text, title: player.videoDetails?.title || title };
-  } catch (error) {
-    return { type: 'youtube', text: null, error: 'Kunne ikke hente transkripsjon: ' + error.message };
+    const result = await tryYouTubeSupadata(videoId);
+    return { type: 'youtube', text: result.text, title };
+  } catch (err) {
+    console.log('Supadata feilet:', err.message);
   }
+
+  try {
+    const result = await tryYouTubeInnertube(videoId);
+    return { type: 'youtube', text: result.text, title: result.title || title };
+  } catch (err) {
+    console.log('Innertube feilet:', err.message);
+  }
+
+  if (feedDescription) {
+    return { type: 'youtube', text: feedDescription, title };
+  }
+
+  return {
+    type: 'youtube',
+    text: null,
+    error: 'Kunne ikke hente transkripsjon fra noen kilde. YouTube blokkerer server-IPs og videoen har ingen feedbeskrivelse.',
+  };
 }
 
 function extractPodcast(url, title, feedDescription) {
