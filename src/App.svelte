@@ -208,8 +208,8 @@
         title: data.title || article.title,
       };
 
-      // Auto-summarize if text is long (more than ~2 paragraphs)
-      if (data.text && data.text.length > 500) {
+      // Auto-summarize if text is long
+      if (data.text && data.text.length > 1000) {
         summarizeContent(data.text, data.title || article.title, data.type);
       }
     } catch (err) {
