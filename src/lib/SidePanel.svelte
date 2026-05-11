@@ -10,6 +10,7 @@
     summaryError = null,
     onclose = () => {},
     onretry = () => {},
+    onsummarize = () => {},
     oncopy = () => {},
   } = $props();
 
@@ -113,19 +114,28 @@
           </div>
         {:else if summary}
           <div class="summary-section">
-            <h3 class="summary-heading">Oppsummering</h3>
-            <div class="summary-text">{@html renderMarkdown(summary)}</div>
-            <button class="toggle-btn" onclick={() => showFullText = !showFullText}>
-              {showFullText ? 'Skjul full tekst' : 'Vis full tekst'}
-            </button>
+            <div class="summary-header">
+              <h3 class="summary-heading">{showFullText ? 'Full tekst' : 'Oppsummering'}</h3>
+              <button class="toggle-btn" onclick={() => showFullText = !showFullText}>
+                {showFullText ? 'Vis oppsummering' : 'Vis full tekst'}
+              </button>
+            </div>
+            {#if showFullText}
+              <div class="content-text inline">
+                <pre>{content.text}</pre>
+              </div>
+            {:else}
+              <div class="summary-text">{@html renderMarkdown(summary)}</div>
+            {/if}
           </div>
         {:else if summaryError}
           <div class="summary-section">
             <p class="summary-error">{summaryError}</p>
+            <button class="retry-summary-btn" onclick={onsummarize}>Prøv oppsummering igjen</button>
           </div>
         {/if}
 
-        {#if !summary || showFullText}
+        {#if !summary}
           <div class="content-text">
             <pre>{content.text}</pre>
           </div>
@@ -149,24 +159,33 @@
   .summary-section {
     margin-bottom: 1rem;
     padding: 0.75rem;
-    background: #f0f7ff;
+    background: var(--bg);
     border-radius: 8px;
-    border-left: 3px solid #3b82f6;
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
   }
 
   .summary-heading {
-    margin: 0 0 0.5rem 0;
+    margin: 0;
     font-size: 0.85rem;
     font-weight: 600;
-    color: #1e40af;
+    color: var(--accent-hover);
     text-transform: uppercase;
     letter-spacing: 0.05em;
+  }
+
+  .summary-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    margin-bottom: 0.5rem;
   }
 
   .summary-text {
     font-size: 0.9rem;
     line-height: 1.6;
-    color: #1e293b;
+    color: var(--text);
     white-space: pre-wrap;
   }
 
@@ -174,7 +193,7 @@
     display: flex;
     align-items: center;
     gap: 0.5rem;
-    color: #6b7280;
+    color: var(--text-muted);
     font-size: 0.85rem;
   }
 
@@ -185,23 +204,45 @@
   }
 
   .summary-error {
-    color: #dc2626;
+    color: #f87171;
     font-size: 0.85rem;
     margin: 0;
   }
 
   .toggle-btn {
-    margin-top: 0.75rem;
+    flex-shrink: 0;
     padding: 0.35rem 0.75rem;
-    background: none;
-    border: 1px solid #93c5fd;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
     border-radius: 4px;
-    color: #2563eb;
+    color: var(--text);
     cursor: pointer;
     font-size: 0.8rem;
   }
 
   .toggle-btn:hover {
-    background: #dbeafe;
+    background: var(--bg-hover);
+  }
+
+  .retry-summary-btn {
+    margin-top: 0.75rem;
+    padding: 0.35rem 0.75rem;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: #fca5a5;
+    cursor: pointer;
+    font-size: 0.8rem;
+  }
+
+  .retry-summary-btn:hover {
+    background: var(--bg-hover);
+  }
+
+  .content-text.inline {
+    margin-top: 0;
+    padding: 0;
+    background: transparent;
+    border: 0;
   }
 </style>

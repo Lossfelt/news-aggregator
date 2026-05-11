@@ -209,7 +209,7 @@
       };
 
       // Auto-summarize if text is long
-      if (data.text && data.text.length > 1000) {
+      if (data.text && data.text.length > 1500) {
         summarizeContent(data.text, data.title || article.title, data.type);
       }
     } catch (err) {
@@ -262,6 +262,16 @@
     }
   }
 
+  function retrySummary() {
+    if (extractedContent?.text) {
+      summarizeContent(
+        extractedContent.text,
+        extractedContent.title || selectedArticle?.title,
+        extractedContent.type,
+      );
+    }
+  }
+
   function copyToClipboard() {
     if (!extractedContent || !selectedArticle) return;
 
@@ -271,10 +281,6 @@
       : 'artikkelen';
 
     const prompt = `Oppsummer denne ${typeLabel} på norsk:
-
-Tittel: ${selectedArticle.title}
-Kilde: ${selectedArticle.source}
-Lenke: ${selectedArticle.link}
 
 ${extractedContent.text}
 
@@ -494,5 +500,6 @@ Gi meg:
   {summaryError}
   onclose={closePanel}
   onretry={retryExtract}
+  onsummarize={retrySummary}
   oncopy={copyToClipboard}
 />
