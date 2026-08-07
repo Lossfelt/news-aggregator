@@ -67,7 +67,7 @@ function generateId(title, link, pubDate) {
 }
 
 function parseRSSItem(item, source) {
-  const title = getTextContent(item, 'title');
+  let title = getTextContent(item, 'title');
   const link = getTextContent(item, 'link') || getAttrContent(item, 'link', 'href');
   const description = getTextContent(item, 'description') || getTextContent(item, 'summary');
   const pubDateStr = getTextContent(item, 'pubDate') || getTextContent(item, 'published') || getTextContent(item, 'date');
@@ -75,6 +75,14 @@ function parseRSSItem(item, source) {
 
   const cleanDescription = cleanHtmlText(description).substring(0, 300);
   const fullDescription = cleanHtmlText(description, { preserveLineBreaks: true });
+
+  // Some RSS feeds, including Bluesky's profile feed, only provide a description.
+  // Use it as a readable fallback title instead of discarding otherwise valid posts.
+  if (!title) {
+    title = cleanDescription.length > 120
+      ? `${cleanDescription.substring(0, 117)}...`
+      : cleanDescription;
+  }
 
   return {
     id: generateId(title, link, pubDateStr),
