@@ -4,6 +4,24 @@ const READ_ARTICLES_KEY = 'feeds_read_articles';
 const LAST_VISIT_KEY = 'feeds_last_visit';
 const SOURCES_KEY = 'feeds_sources';
 
+const SOURCE_URL_MIGRATIONS = new Map([
+  [
+    'https://bluestream.deno.dev/emollick.bsky.social?reply=exclude',
+    'https://bsky.app/profile/emollick.bsky.social/rss',
+  ],
+]);
+
+function migrateSources(sources) {
+  let changed = false;
+  const migrated = sources.map((source) => {
+    const url = SOURCE_URL_MIGRATIONS.get(source.url);
+    if (!url) return source;
+    changed = true;
+    return { ...source, url };
+  });
+  return { sources: migrated, changed };
+}
+
 export function getReadArticles() {
   try {
     const stored = localStorage.getItem(READ_ARTICLES_KEY);
@@ -45,7 +63,11 @@ export function toggleRead(articleId) {
 export function getSources() {
   try {
     const stored = localStorage.getItem(SOURCES_KEY);
-    if (stored) return JSON.parse(stored);
+    if (stored) {
+      const migration = migrateSources(JSON.parse(stored));
+      if (migration.changed) saveSources(migration.sources);
+      return migration.sources;
+    }
   } catch { /* fall through */ }
   // First-time migration: seed from defaults
   const initial = defaultSources.map(s => ({ ...s, enabled: true }));
@@ -132,10 +154,11 @@ export async function syncFromServer() {
     // Merge sources: union by URL, server wins for duplicates
     if (server.sources) {
       const localSources = getSources();
-      const serverMap = new Map(server.sources.map(s => [s.url, s]));
+      const serverSources = migrateSources(server.sources).sources;
+      const serverMap = new Map(serverSources.map(s => [s.url, s]));
       const localMap = new Map(localSources.map(s => [s.url, s]));
       // Start with server sources, then add local-only
-      const mergedSources = [...server.sources];
+      const mergedSources = [...serverSources];
       for (const [url, source] of localMap) {
         if (!serverMap.has(url)) {
           mergedSources.push(source);

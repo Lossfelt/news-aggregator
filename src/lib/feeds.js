@@ -20,7 +20,7 @@ export const defaultSources = [
   { name: 'Forward Future Podcast', url: 'https://anchor.fm/s/f7cac464/podcast/rss' },
 
   // Bluesky
-  { name: 'Ethan Mollick (Bluesky)', url: 'https://bluestream.deno.dev/emollick.bsky.social?reply=exclude' },
+  { name: 'Ethan Mollick (Bluesky)', url: 'https://bsky.app/profile/emollick.bsky.social/rss' },
 
   // Via Olshansk repo
   { name: 'Anthropic News', url: 'https://raw.githubusercontent.com/Olshansk/rss-feeds/main/feeds/feed_anthropic_news.xml' },

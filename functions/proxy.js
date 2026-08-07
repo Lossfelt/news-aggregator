@@ -31,6 +31,35 @@ async function fetchWithRetry(url, options = {}, retries = 2, timeout = 10000) {
   }
 }
 
+// Buffered Netlify Function responses are limited to 6 MB. Keep a margin for
+// function-response serialization while retaining the newest RSS items.
+const MAX_PROXY_BODY_BYTES = 4 * 1024 * 1024;
+
+function limitRssResponseSize(xml, maxBytes = MAX_PROXY_BODY_BYTES) {
+  if (Buffer.byteLength(xml, 'utf8') <= maxBytes) return xml;
+
+  const firstItemIndex = xml.search(/<item\b/i);
+  const channelEndMatch = /<\/channel\s*>/i.exec(xml);
+  if (firstItemIndex === -1 || !channelEndMatch || channelEndMatch.index <= firstItemIndex) {
+    return xml;
+  }
+
+  const itemSection = xml.slice(firstItemIndex, channelEndMatch.index);
+  const items = itemSection.match(/<item\b[\s\S]*?<\/item\s*>/gi);
+  if (!items?.length) return xml;
+
+  const prefix = xml.slice(0, firstItemIndex);
+  const suffix = xml.slice(channelEndMatch.index);
+  let limited = prefix;
+
+  for (const item of items) {
+    if (Buffer.byteLength(limited + item + suffix, 'utf8') > maxBytes) break;
+    limited += item;
+  }
+
+  return limited + suffix;
+}
+
 exports.handler = async (event) => {
   const headers = {
     'Access-Control-Allow-Origin': '*',
@@ -74,7 +103,7 @@ exports.handler = async (event) => {
     }
 
     const contentType = response.headers.get('content-type') || 'application/xml';
-    const body = await response.text();
+    const body = limitRssResponseSize(await response.text());
 
     console.log(`Successfully fetched ${feedUrl}, length: ${body.length}`);
 

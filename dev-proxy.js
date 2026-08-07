@@ -9,6 +9,32 @@ import zlib from 'zlib';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SYNC_FILE = path.join(__dirname, '.sync-data.json');
+const MAX_PROXY_BODY_BYTES = 4 * 1024 * 1024;
+
+function limitRssResponseSize(xml, maxBytes = MAX_PROXY_BODY_BYTES) {
+  if (Buffer.byteLength(xml, 'utf8') <= maxBytes) return xml;
+
+  const firstItemIndex = xml.search(/<item\b/i);
+  const channelEndMatch = /<\/channel\s*>/i.exec(xml);
+  if (firstItemIndex === -1 || !channelEndMatch || channelEndMatch.index <= firstItemIndex) {
+    return xml;
+  }
+
+  const itemSection = xml.slice(firstItemIndex, channelEndMatch.index);
+  const items = itemSection.match(/<item\b[\s\S]*?<\/item\s*>/gi);
+  if (!items?.length) return xml;
+
+  const prefix = xml.slice(0, firstItemIndex);
+  const suffix = xml.slice(channelEndMatch.index);
+  let limited = prefix;
+
+  for (const item of items) {
+    if (Buffer.byteLength(limited + item + suffix, 'utf8') > maxBytes) break;
+    limited += item;
+  }
+
+  return limited + suffix;
+}
 
 const server = http.createServer(async (req, res) => {
   // CORS headers
@@ -58,7 +84,7 @@ const server = http.createServer(async (req, res) => {
     });
 
     const contentType = response.headers.get('content-type') || 'application/xml';
-    const body = await response.text();
+    const body = limitRssResponseSize(await response.text());
 
     res.writeHead(response.status, {
       'Content-Type': contentType,
