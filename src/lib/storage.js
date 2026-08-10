@@ -11,15 +11,30 @@ const SOURCE_URL_MIGRATIONS = new Map([
   ],
 ]);
 
-function migrateSources(sources) {
+function normalizeSources(sources) {
   let changed = false;
-  const migrated = sources.map((source) => {
+  const normalized = [];
+  const sourcesByUrl = new Map();
+
+  for (const source of sources) {
     const url = SOURCE_URL_MIGRATIONS.get(source.url);
-    if (!url) return source;
-    changed = true;
-    return { ...source, url };
-  });
-  return { sources: migrated, changed };
+    const migrated = url ? { ...source, url } : source;
+    if (url) changed = true;
+
+    const existing = sourcesByUrl.get(migrated.url);
+    if (existing) {
+      // A migration can turn an old and a new source into the same URL.
+      // Keep one source, but preserve it if either copy is enabled.
+      existing.enabled = existing.enabled || migrated.enabled;
+      changed = true;
+      continue;
+    }
+
+    sourcesByUrl.set(migrated.url, migrated);
+    normalized.push(migrated);
+  }
+
+  return { sources: normalized, changed };
 }
 
 export function getReadArticles() {
@@ -64,7 +79,7 @@ export function getSources() {
   try {
     const stored = localStorage.getItem(SOURCES_KEY);
     if (stored) {
-      const migration = migrateSources(JSON.parse(stored));
+      const migration = normalizeSources(JSON.parse(stored));
       if (migration.changed) saveSources(migration.sources);
       return migration.sources;
     }
@@ -154,7 +169,7 @@ export async function syncFromServer() {
     // Merge sources: union by URL, server wins for duplicates
     if (server.sources) {
       const localSources = getSources();
-      const serverSources = migrateSources(server.sources).sources;
+      const serverSources = normalizeSources(server.sources).sources;
       const serverMap = new Map(serverSources.map(s => [s.url, s]));
       const localMap = new Map(localSources.map(s => [s.url, s]));
       // Start with server sources, then add local-only

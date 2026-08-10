@@ -56,6 +56,16 @@
     lastVisit ? articles.filter(a => a.pubDate && a.pubDate.getTime() > lastVisit).length : 0
   );
 
+  function deduplicateArticles(items) {
+    const seen = new Set();
+    return items.filter((article) => {
+      const key = `${article.source}\u0000${article.link}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }
+
   async function loadFeeds() {
     loading = true;
     loadingStatus = 'Henter feeds...';
@@ -84,7 +94,7 @@
       allArticles.push(...recent);
     }
 
-    articles = sortByDate(allArticles);
+    articles = sortByDate(deduplicateArticles(allArticles));
     readArticles = getReadArticles();
     loading = false;
 
