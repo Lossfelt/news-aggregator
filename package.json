@@ -5,15 +5,15 @@
   "type": "module",
   "scripts": {
     "dev": "concurrently \"node dev-proxy.js\" \"vite\"",
+    "dev:netlify": "npx --yes netlify-cli@latest dev",
     "build": "vite build",
     "preview": "vite preview"
   },
   "devDependencies": {
-    "@mozilla/readability": "^0.5.0",
+    "@mozilla/readability": "^0.6.0",
     "@sveltejs/vite-plugin-svelte": "^5.0.0",
     "concurrently": "^9.2.1",
     "jsdom": "^24.0.0",
-    "netlify-cli": "^23.14.0",
     "svelte": "^5.0.0",
     "vite": "^6.0.0"
   },
