@@ -3,8 +3,9 @@
   publish = "dist"
 
 [build.environment]
-  # jsdom 30 krever Node ^22.22.2 || ^24.15.0
-  NODE_VERSION = "22"
+  # jsdom 30 krever Node ^22.22.2 || ^24.15.0 og require(esm)
+  NODE_VERSION = "24"
+  AWS_LAMBDA_JS_RUNTIME = "nodejs24.x"
 
 [functions]
   directory = "functions"
