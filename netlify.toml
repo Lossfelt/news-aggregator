@@ -2,6 +2,10 @@
   command = "npm run build"
   publish = "dist"
 
+[build.environment]
+  # jsdom 30 krever Node ^22.22.2 || ^24.15.0
+  NODE_VERSION = "22"
+
 [functions]
   directory = "functions"
 
