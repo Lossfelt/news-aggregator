@@ -2,6 +2,8 @@ const { Readability } = require('@mozilla/readability');
 const { JSDOM } = require('jsdom');
 const https = require('https');
 const zlib = require('zlib');
+const { safeFetch } = require('./_lib/net-guard');
+const { decodeEntities, stripTags } = require('./_lib/text');
 
 exports.handler = async (event) => {
   const headers = {
@@ -144,22 +146,13 @@ function httpsRequest(method, url, body, extraHeaders) {
   });
 }
 
-function decodeEntities(str) {
-  return str
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'");
-}
-
 function parseCaptionXml(xml) {
   const segments = [];
   const isMillis = xml.includes('<p ');
   const re = /<(?:text|p)\s+[^>]*?(?:start|t)="([^"]*)"[^>]*?(?:dur|d)="([^"]*)"[^>]*>(.*?)<\/(?:text|p)>/gs;
   let m;
   while ((m = re.exec(xml)) !== null) {
-    const text = decodeEntities(m[3].replace(/<[^>]*>/g, '').trim());
+    const text = decodeEntities(stripTags(m[3]).trim());
     if (text) segments.push(text);
   }
   return segments;
@@ -325,7 +318,7 @@ async function extractBluesky(url, title) {
 
 async function extractArticle(url, title, feedDescription) {
   try {
-    const response = await fetch(url, {
+    const response = await safeFetch(url, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
@@ -334,7 +327,6 @@ async function extractArticle(url, title, feedDescription) {
         'Cache-Control': 'no-cache',
         'Pragma': 'no-cache',
       },
-      redirect: 'follow',
     });
 
     if (!response.ok) {

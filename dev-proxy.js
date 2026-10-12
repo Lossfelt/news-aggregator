@@ -6,6 +6,12 @@ import { Readability } from '@mozilla/readability';
 import { JSDOM } from 'jsdom';
 import https from 'https';
 import zlib from 'zlib';
+import { createRequire } from 'module';
+
+const require = createRequire(import.meta.url);
+// Samme beskyttelse som Netlify-funksjonene (blokkerer lokale og private adresser).
+const { safeFetch } = require('./functions/_lib/net-guard.js');
+const { decodeEntities, stripTags } = require('./functions/_lib/text.js');
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SYNC_FILE = path.join(__dirname, '.sync-data.json');
@@ -75,12 +81,11 @@ const server = http.createServer(async (req, res) => {
   }
 
   try {
-    const response = await fetch(feedUrl, {
+    const response = await safeFetch(feedUrl, {
       headers: {
         'User-Agent': 'FeedsApp/1.0 (RSS Reader)',
         Accept: 'application/rss+xml, application/atom+xml, application/xml, text/xml, */*',
       },
-      redirect: 'follow',
     });
 
     const contentType = response.headers.get('content-type') || 'application/xml';
@@ -92,7 +97,7 @@ const server = http.createServer(async (req, res) => {
     });
     res.end(body);
   } catch (err) {
-    res.writeHead(500, { 'Content-Type': 'application/json' });
+    res.writeHead(err.code === 'BLOCKED_URL' ? 400 : 500, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ error: err.message }));
   }
 });
@@ -261,21 +266,12 @@ function httpsRequest(method, url, body, extraHeaders) {
   });
 }
 
-function decodeEntities(str) {
-  return str
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'");
-}
-
 function parseCaptionXml(xml) {
   const segments = [];
   const re = /<(?:text|p)\s+[^>]*?(?:start|t)="([^"]*)"[^>]*?(?:dur|d)="([^"]*)"[^>]*>(.*?)<\/(?:text|p)>/gs;
   let m;
   while ((m = re.exec(xml)) !== null) {
-    const text = decodeEntities(m[3].replace(/<[^>]*>/g, '').trim());
+    const text = decodeEntities(stripTags(m[3]).trim());
     if (text) segments.push(text);
   }
   return segments;
@@ -421,7 +417,7 @@ async function extractBluesky(url, title) {
 
 async function extractArticle(url, title, feedDescription) {
   try {
-    const response = await fetch(url, {
+    const response = await safeFetch(url, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
@@ -430,7 +426,6 @@ async function extractArticle(url, title, feedDescription) {
         'Cache-Control': 'no-cache',
         'Pragma': 'no-cache',
       },
-      redirect: 'follow',
     });
 
     if (!response.ok) {
@@ -574,6 +569,6 @@ async function handleSummarize(req, res) {
   }
 }
 
-server.listen(3001, () => {
+server.listen(3001, '127.0.0.1', () => {
   console.log('Proxy server running on http://localhost:3001');
 });
