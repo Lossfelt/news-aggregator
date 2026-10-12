@@ -7,7 +7,8 @@
     "dev": "concurrently \"node dev-proxy.js\" \"vite\"",
     "dev:netlify": "npx --yes netlify-cli@latest dev",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "node --test \"tests/*.test.js\""
   },
   "devDependencies": {
     "@mozilla/readability": "^0.6.0",

@@ -1,3 +1,5 @@
+const { safeFetch } = require('./_lib/net-guard');
+
 // Helper function to fetch with timeout and retry
 async function fetchWithRetry(url, options = {}, retries = 2, timeout = 10000) {
   for (let i = 0; i <= retries; i++) {
@@ -5,7 +7,7 @@ async function fetchWithRetry(url, options = {}, retries = 2, timeout = 10000) {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), timeout);
 
-      const response = await fetch(url, {
+      const response = await safeFetch(url, {
         ...options,
         signal: controller.signal,
       });
@@ -90,7 +92,6 @@ exports.handler = async (event) => {
         'Accept': 'application/rss+xml, application/atom+xml, application/xml, text/xml, */*',
         'Accept-Encoding': 'gzip, deflate, br',
       },
-      redirect: 'follow',
     }, 2, 15000); // 2 retries, 15 second timeout
 
     if (!response.ok) {
@@ -117,6 +118,13 @@ exports.handler = async (event) => {
       body,
     };
   } catch (error) {
+    if (error.code === 'BLOCKED_URL') {
+      return {
+        statusCode: 400,
+        headers: { ...headers, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ error: error.message }),
+      };
+    }
     console.error('Error fetching feed:', error);
     return {
       statusCode: 500,

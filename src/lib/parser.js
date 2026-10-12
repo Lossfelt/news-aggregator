@@ -18,13 +18,14 @@ function getAttrContent(element, selector, attr) {
 function decodeHtmlEntities(str) {
   return str
     .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
     .replace(/&quot;/g, '"')
     .replace(/&apos;/g, "'")
     .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => String.fromCodePoint(parseInt(hex, 16)))
-    .replace(/&#(\d+);/g, (_, dec) => String.fromCodePoint(parseInt(dec, 10)));
+    .replace(/&#(\d+);/g, (_, dec) => String.fromCodePoint(parseInt(dec, 10)))
+    // &amp; må dekodes sist, ellers dekodes teksten to ganger ("&amp;lt;" til "<").
+    .replace(/&amp;/g, '&');
 }
 
 function cleanHtmlText(html, { preserveLineBreaks = false } = {}) {
@@ -36,7 +37,12 @@ function cleanHtmlText(html, { preserveLineBreaks = false } = {}) {
       .replace(/<\/(p|div|li|h[1-6]|tr)>/gi, '\n')
       .replace(/<\/(ul|ol|blockquote)>/gi, '\n\n');
   }
-  s = s.replace(/<[^>]*>/g, '');
+  // Gjenta til ingen tagger gjenstår: "<<b>script>" blir "<script>" etter ett pass.
+  let previous;
+  do {
+    previous = s;
+    s = s.replace(/<[^>]*>/g, '');
+  } while (s !== previous);
   s = decodeHtmlEntities(s);
   // Remove invisible formatting characters (word joiner, zero-width spaces, etc.)
   s = s.replace(/[\u2060\u200B-\u200D\uFEFF]/g, '');
