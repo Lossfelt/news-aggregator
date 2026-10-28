@@ -1,0 +1,38 @@
+name: Tests and build
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          check-latest: true
+          package-manager-cache: false
+      - name: Install root dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      # Functions has its own manifest but no lockfile. Install it separately
+      # so extraction tests exercise the same dependency boundary as deployment.
+      - name: Install Functions dependencies
+        working-directory: functions
+        run: npm install --ignore-scripts --no-audit --no-fund --package-lock=false
+      - name: Run tests
+        run: npm test
+      - name: Build application
+        run: npm run build
