@@ -15,7 +15,7 @@
     "@sveltejs/vite-plugin-svelte": "^7.3.1",
     "concurrently": "^10.0.6",
     "jsdom": "^24.0.0",
-    "svelte": "^5.56.10",
+    "svelte": "^5.57.3",
     "vite": "^8.3.5"
   },
   "dependencies": {
